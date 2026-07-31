@@ -13,6 +13,9 @@ closing the window.
 
 Not a merge tool: no editing, no conflict resolution, no comments. It's a reader.
 
+<img width="1848" height="918" alt="Screenshot from 2026-07-31 20-10-33" src="https://github.com/user-attachments/assets/27270ab3-a4e5-483e-8b9d-6653b22e0949" />
+
+
 ---
 
 ## Install
