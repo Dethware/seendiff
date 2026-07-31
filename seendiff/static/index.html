@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>seendiff</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+  // apply persisted theme before first paint to avoid a flash of wrong theme
+  (function () {
+    var t = localStorage.getItem("seendiff.theme");
+    if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.dataset.theme = t;
+    var f = localStorage.getItem("seendiff.font") || "JetBrains Mono";
+    document.documentElement.style.setProperty("--mono-font", "'" + f + "'");
+  })();
+</script>
+<link rel="stylesheet" href="/theme.css">
+<style>
+@font-face { font-family: 'JetBrains Mono'; font-weight: 400 700;
+  src: url('/fonts/JetBrainsMono.woff2') format('woff2'); }
+@font-face { font-family: 'Ubuntu Sans Mono'; font-weight: 400 700;
+  src: url('/fonts/UbuntuSansMono.woff2') format('woff2'); }
+
+:root {
+  --mono-font: 'JetBrains Mono';
+  --line-height: 20px;
+  --font-size: 12.5px;
+}
+:root[data-theme="light"] {
+  --bg: #ffffff; --bg2: #f2f2f3; --fg: #1d1d1f; --fg-dim: #6e6e73;
+  --border: #d6d6da; --accent: #5f6b7a;
+  --add-bg: rgba(26,127,55,.08); --del-bg: rgba(207,34,46,.08);
+  --add-sign: #1a7f37; --del-sign: #cf222e; --mixed: #9a6700;
+  --sel-bg: rgba(95,107,122,.16); --focus-ring: #5f6b7a;
+  --toast-bg: #3a3a3f; --toast-fg: #ffffff;
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117; --bg2: #161b22; --fg: #c9d1d9; --fg-dim: #8b949e;
+  --border: #30363d; --accent: #58a6ff;
+  --add-bg: rgba(63,185,80,.09); --del-bg: rgba(248,81,73,.09);
+  --add-sign: #3fb950; --del-sign: #f85149; --mixed: #d29922;
+  --sel-bg: rgba(56,139,253,.25); --focus-ring: #58a6ff;
+  --toast-bg: #c9d1d9; --toast-fg: #0d1117;
+}
+:root[data-theme="solarized"] {
+  --bg: #002b36; --bg2: #073642; --fg: #93a1a1; --fg-dim: #657b83;
+  --border: #0a4552; --accent: #268bd2;
+  --add-bg: rgba(133,153,0,.10); --del-bg: rgba(220,50,47,.10);
+  --add-sign: #859900; --del-sign: #dc322f; --mixed: #b58900;
+  --sel-bg: rgba(38,139,210,.25); --focus-ring: #268bd2;
+  --toast-bg: #eee8d5; --toast-fg: #002b36;
+}
+:root[data-theme="space"] {
+  --bg: #111113; --bg2: #1a1a1d; --fg: #b8bbc2; --fg-dim: #77797f;
+  --border: #2b2b30; --accent: #9aa4ae;
+  --add-bg: rgba(163,190,140,.09); --del-bg: rgba(191,97,106,.10);
+  --add-sign: #a3be8c; --del-sign: #bf616a; --mixed: #ebcb8b;
+  --sel-bg: rgba(154,164,174,.20); --focus-ring: #9aa4ae;
+  --toast-bg: #d8d8dc; --toast-fg: #111113;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 13px/1.45 system-ui, sans-serif;
+  display: flex; overflow: hidden;
+}
+button { font: inherit; color: inherit; background: none; border: 1px solid var(--border);
+  border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+
+/* ---- sidebar ---- */
+#sidebar { width: 300px; min-width: 160px; max-width: 60vw; background: var(--bg2);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column;
+  flex: none; position: relative; }
+#sb-resizer { position: absolute; top: 0; right: -3px; width: 6px; height: 100%;
+  cursor: col-resize; z-index: 5; }
+#sb-resizer:hover, #sb-resizer.active { background: var(--accent); opacity: .5; }
+#sb-head { padding: 10px 12px 8px; border-bottom: 1px solid var(--border); }
+#sb-title { font-weight: 600; }
+#sb-stats { color: var(--fg-dim); font-size: 12px; margin-top: 2px; }
+#sb-base { color: var(--fg-dim); font-size: 11px; margin-top: 2px;
+  font-family: var(--mono-font), monospace; }
+#dirty-banner { margin-top: 6px; font-size: 12px; color: var(--mixed);
+  cursor: default; display: none; }
+#sb-progress { display: flex; height: 7px; border-radius: 3px; overflow: hidden;
+  margin-top: 7px; background: color-mix(in srgb, var(--fg) 14%, transparent); }
+#sb-progress .rev { background: var(--add-sign); transition: width .3s; }
+#sb-progress .seen { background: color-mix(in srgb, var(--add-sign) 40%, transparent);
+  transition: width .3s; }
+#confetti { position: fixed; inset: 0; pointer-events: none; z-index: 30; }
+#filter { margin: 8px 10px; padding: 4px 8px; width: calc(100% - 20px);
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; font: inherit; }
+#filter:focus { outline: 1px solid var(--accent); }
+#filelist { overflow-y: auto; flex: 1; padding-bottom: 12px; }
+.f-item, .d-item { padding: 4px 10px 4px 8px; cursor: pointer; display: flex;
+  align-items: center; gap: 6px; border-left: 2px solid transparent; }
+.d-item { color: var(--fg-dim); }
+.d-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.d-arrow { width: 12px; flex: none; text-align: center; font-size: 10px; }
+.d-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-family: var(--mono-font), monospace; font-size: 12px; }
+.f-item:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.f-item.cur { border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.f-glyph { width: 14px; text-align: center; flex: none; cursor: pointer; }
+.f-glyph.done { color: var(--add-sign); }
+.f-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; direction: rtl; text-align: left;
+  font-family: var(--mono-font), monospace; font-size: 12px; }
+.f-name bdi { unicode-bidi: plaintext; }
+.f-right { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.f-counts { font-size: 10.5px; color: var(--fg-dim);
+  font-family: var(--mono-font), monospace; white-space: nowrap; }
+.f-counts .plus { color: var(--add-sign); } .f-counts .minus { color: var(--del-sign); }
+.f-bar { width: 64px; height: 5px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in srgb, var(--fg) 14%, transparent); display: flex; }
+.f-bar .rev { background: var(--add-sign); height: 100%; }
+.f-bar .seen { background: color-mix(in srgb, var(--add-sign) 40%, transparent); height: 100%; }
+
+/* ---- main ---- */
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#topbar { display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+  border-bottom: 1px solid var(--border); background: var(--bg2); flex: none; }
+#tb-path { font-family: var(--mono-font), monospace; font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tb-info { color: var(--fg-dim); font-size: 12px; white-space: nowrap; }
+#tb-sp { flex: 1; }
+#topbar button { font-size: 12px; }
+
+#pane-wrap { flex: 1; display: flex; min-height: 0; position: relative; }
+#pane { flex: 1; overflow: auto; position: relative;
+  font-family: var(--mono-font), monospace; font-size: var(--font-size); }
+#spacer { position: relative; min-width: 100%; }
+.row { position: absolute; left: 0; right: 0;
+  line-height: var(--line-height); display: flex; align-items: flex-start; }
+.row.add { background: var(--add-bg); }
+.row.del { background: var(--del-bg); }
+.row.focused-block { box-shadow: inset 2px 0 0 var(--focus-ring); }
+.row.selected .ln.new, .row.selected .content { background: var(--sel-bg); }
+.ln { flex: none; width: 4.5em; padding-right: 8px; text-align: right;
+  color: var(--fg-dim); cursor: pointer; user-select: none; font-size: 11px; }
+.ln:hover { color: var(--accent); }
+.sign { flex: none; width: 1.2em; text-align: center; user-select: none; font-weight: 700; }
+.row.add .sign { color: var(--add-sign); }
+.row.del .sign { color: var(--del-sign); }
+.chk { flex: none; width: 1.4em; text-align: center; cursor: pointer;
+  user-select: none; color: var(--fg-dim); }
+.chk.reviewed { color: var(--add-sign); }
+.chk:hover { color: var(--accent); }
+.content { flex: 1; min-width: 0; font-family: inherit; font-size: inherit;
+  white-space: pre-wrap; word-break: break-all; tab-size: 4; }
+#empty-msg { padding: 48px; color: var(--fg-dim); font-size: 14px;
+  font-family: system-ui, sans-serif; }
+
+/* ---- minimap ---- */
+#minimap { flex: none; width: 14px; cursor: pointer; background: var(--bg2);
+  border-left: 1px solid var(--border); }
+
+/* ---- help ---- */
+#help-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45);
+  display: none; align-items: center; justify-content: center; z-index: 20; }
+#help-overlay.show { display: flex; }
+#help { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 18px 22px; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,.35); }
+#help-title { font-weight: 600; margin-bottom: 10px; }
+#help table { border-collapse: collapse; }
+#help td { padding: 3px 8px; vertical-align: top; }
+#help td:first-child { font-family: var(--mono-font), monospace; font-size: 12px;
+  color: var(--accent); white-space: nowrap; text-align: right; }
+#help-hint { margin-top: 10px; color: var(--fg-dim); font-size: 12px; }
+
+/* ---- confirm ---- */
+#confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45);
+  display: none; align-items: center; justify-content: center; z-index: 21; }
+#confirm-overlay.show { display: flex; }
+#confirm { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 18px 22px; max-width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,.35); }
+#confirm-btns { margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end; }
+#confirm-yes { border-color: var(--del-sign); color: var(--del-sign); }
+
+/* ---- toast ---- */
+#toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+  background: var(--toast-bg); color: var(--toast-fg); padding: 8px 16px;
+  border-radius: 6px; font-size: 12.5px; opacity: 0; transition: opacity .18s;
+  pointer-events: none; max-width: 70vw; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; z-index: 10; }
+#toast.show { opacity: 1; }
+#toast input { pointer-events: auto; font: inherit; width: 320px; }
+</style>
+</head>
+<body>
+<nav id="sidebar">
+  <div id="sb-head">
+    <div id="sb-title">seendiff</div>
+    <div id="sb-stats">loading…</div>
+    <div id="sb-progress"><span class="rev"></span><span class="seen"></span></div>
+    <div id="sb-base"></div>
+    <div id="dirty-banner"></div>
+  </div>
+  <input id="filter" placeholder="filter files  (g)" spellcheck="false">
+  <div id="filelist"></div>
+  <div id="sb-resizer" title="drag to resize"></div>
+</nav>
+<main id="main">
+  <div id="topbar">
+    <span id="tb-path">no file open</span>
+    <span id="tb-info"></span>
+    <span id="tb-sp"></span>
+    <button id="btn-hide" title="hide fully-reviewed files (h)">hide ✓</button>
+    <button id="btn-font" title="toggle font"></button>
+    <button id="btn-theme" title="cycle theme (t)"></button>
+    <button id="btn-keys" title="keyboard shortcuts (?)">keys?</button>
+  </div>
+  <div id="pane-wrap">
+    <div id="pane"><div id="spacer"></div></div>
+    <canvas id="minimap"></canvas>
+  </div>
+</main>
+<div id="help-overlay">
+  <div id="help">
+    <div id="help-title">Keyboard shortcuts</div>
+    <table>
+      <tr><td>← / →</td><td>prev / next change block in this file</td></tr>
+      <tr><td>↑ / ↓</td><td>prev / next file</td></tr>
+      <tr><td>R</td><td>mark block reviewed, advance (toggles off if reviewed)</td></tr>
+      <tr><td>n / N</td><td>next / prev unreviewed block, crosses files</td></tr>
+      <tr><td>j / k</td><td>scroll lines</td></tr>
+      <tr><td>d / u</td><td>scroll half page</td></tr>
+      <tr><td>V</td><td>mark all seen-but-unreviewed blocks in file reviewed</td></tr>
+      <tr><td>f</td><td>mark whole file reviewed, next file</td></tr>
+      <tr><td>y</td><td>copy ref + content (selection or focused block)</td></tr>
+      <tr><td>Y</td><td>copy refs for all unreviewed blocks in file</td></tr>
+      <tr><td>g</td><td>focus file filter</td></tr>
+      <tr><td>h</td><td>hide fully-reviewed files</td></tr>
+      <tr><td>t</td><td>cycle theme</td></tr>
+      <tr><td>X</td><td>reset all seen / reviewed state (asks first)</td></tr>
+      <tr><td>?</td><td>this help &nbsp;·&nbsp; Esc closes</td></tr>
+    </table>
+    <div id="help-hint">click a line number to copy a ref · shift-click / drag for a range</div>
+  </div>
+</div>
+<div id="confirm-overlay">
+  <div id="confirm">
+    <div id="confirm-msg"></div>
+    <div id="confirm-btns">
+      <button id="confirm-yes">Reset (Enter)</button>
+      <button id="confirm-no">Cancel (Esc)</button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const pane = $("pane"), spacer = $("spacer"), mm = $("minimap");
+const LH = parseFloat(getComputedStyle(document.documentElement)
+                      .getPropertyValue("--line-height"));
+const THEMES = ["light", "dark", "solarized", "space"];
+const FONTS = ["JetBrains Mono", "Ubuntu Sans Mono"];
+
+let meta = null;          // /api/files payload
+let file = null;          // /api/file payload for the open file
+let blocks = [];          // file.blocks + row ranges, in row order
+let blockByRow = [];      // rowIdx -> block index or -1
+let curPath = null;
+let focusIdx = -1;        // focused block index
+let hideDone = localStorage.getItem("seendiff.hide") === "1";
+let selAnchor = null, selEnd = null;   // gutter selection, row indices
+let seenQueue = new Map();             // "path|id" -> {path, hunk_id}
+let dwell = new Map();                 // block idx -> first-fully-visible ts
+
+/* ---------- celebration ---------- */
+let allDone = null;
+function celebrate() {
+  const cv = document.createElement("canvas");
+  cv.id = "confetti";
+  document.body.append(cv);
+  const dpr = devicePixelRatio || 1;
+  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr;
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const cs = getComputedStyle(document.documentElement);
+  const colors = ["--add-sign", "--del-sign", "--mixed", "--accent", "--fg"]
+    .map(v => cs.getPropertyValue(v).trim());
+  const parts = [];
+  for (let i = 0; i < 180; i++) {
+    const fromLeft = i % 2 === 0;
+    parts.push({
+      x: fromLeft ? -10 : innerWidth + 10,
+      y: innerHeight * (0.4 + Math.random() * 0.5),
+      vx: (fromLeft ? 1 : -1) * (4 + Math.random() * 8),
+      vy: -(7 + Math.random() * 7),
+      w: 4 + Math.random() * 5, h: 6 + Math.random() * 6,
+      rot: Math.random() * Math.PI, vr: (Math.random() - .5) * .3,
+      color: colors[i % colors.length],
+    });
+  }
+  const t0 = performance.now();
+  (function tick(t) {
+    const dt = Math.min(2, (t - (tick.last || t0)) / 16.7); tick.last = t;
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    for (const p of parts) {
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      p.vy += 0.25 * dt; p.vx *= 0.99; p.rot += p.vr * dt;
+      ctx.save();
+      ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+    if (t - t0 < 3200) requestAnimationFrame(tick);
+    else cv.remove();
+  })(t0);
+  toast("🎉 all " + meta.stats.blocks + " blocks reviewed — ship it");
+}
+
+/* ---------- utils ---------- */
+function toast(msg, inputText) {
+  const t = $("toast");
+  t.textContent = msg;
+  if (inputText !== undefined) {
+    const inp = document.createElement("input");
+    inp.value = inputText;
+    t.append(" ", inp);
+    inp.focus(); inp.select();
+  }
+  t.classList.add("show");
+  clearTimeout(toast._h);
+  toast._h = setTimeout(() => t.classList.remove("show"), inputText ? 4000 : 1600);
+}
+async function copyText(text, what) {
+  try { await navigator.clipboard.writeText(text); toast("copied  " + what); }
+  catch (e) { toast("copy manually:", text); }
+}
+async function api(method, url, body) {
+  const r = await fetch(url, {
+    method,
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) { toast("api error " + r.status); throw new Error(url); }
+  return r.json();
+}
+
+/* ---------- sidebar ---------- */
+function fileGlyph(f) {
+  if (f.reviewed >= f.blocks) return ["✓", "done"];
+  if (f.reviewed > 0 || f.seen > 0) return ["◐", ""];
+  return ["○", ""];
+}
+let collapsed = new Set(JSON.parse(localStorage.getItem("seendiff.collapsed") || "[]"));
+function saveCollapsed() {
+  localStorage.setItem("seendiff.collapsed", JSON.stringify([...collapsed]));
+}
+function makeBar(rev, seen, total) {
+  const bar = document.createElement("span"); bar.className = "f-bar";
+  const r = document.createElement("span"); r.className = "rev";
+  r.style.width = (100 * rev / total) + "%";
+  const s = document.createElement("span"); s.className = "seen";
+  s.style.width = (100 * seen / total) + "%";
+  bar.append(r, s);
+  return bar;
+}
+function makeFileItem(f, label, indent) {
+  const item = document.createElement("div");
+  item.className = "f-item" + (f.path === curPath ? " cur" : "");
+  item.style.paddingLeft = (8 + indent * 14) + "px";
+  const [g, gcls] = fileGlyph(f);
+  const glyph = document.createElement("span");
+  glyph.className = "f-glyph " + gcls; glyph.textContent = g;
+  glyph.title = "toggle whole file reviewed";
+  glyph.onclick = e => { e.stopPropagation(); toggleFileReviewed(f); };
+  const name = document.createElement("span");
+  name.className = "f-name";
+  const bdi = document.createElement("bdi");
+  bdi.textContent = label;
+  name.append(bdi);
+  name.title = (f.old_path ? f.old_path + " → " : "") + f.path;
+  const right = document.createElement("span"); right.className = "f-right";
+  const counts = document.createElement("span"); counts.className = "f-counts";
+  if (f.status === "binary" || f.status === "meta" || f.status === "submodule") {
+    counts.textContent = f.status === "submodule" ? "⌥ pointer" : f.status;
+  } else {
+    const p = document.createElement("span"); p.className = "plus"; p.textContent = "+" + f.added;
+    const m = document.createElement("span"); m.className = "minus"; m.textContent = "−" + f.removed;
+    counts.append(p, " ", m);
+  }
+  right.append(counts, makeBar(f.reviewed, f.seen, f.blocks));
+  item.append(glyph, name, right);
+  item.onclick = () => openFile(f.path);
+  return item;
+}
+function buildTree(files) {
+  const root = { dirs: new Map(), files: [] };
+  for (const f of files) {
+    const parts = f.path.split("/");
+    let node = root;
+    for (const part of parts.slice(0, -1)) {
+      if (!node.dirs.has(part)) node.dirs.set(part, { dirs: new Map(), files: [] });
+      node = node.dirs.get(part);
+    }
+    node.files.push(f);
+  }
+  // compress single-child chains: a dir with exactly one subdir and no files
+  // merges into "a/b" so nesting doesn't eat horizontal space
+  function compress(node) {
+    for (const [name, child] of [...node.dirs]) {
+      compress(child);
+      let n = name, c = child;
+      while (c.files.length === 0 && c.dirs.size === 1) {
+        const [[sub, subNode]] = c.dirs;
+        n = n + "/" + sub; c = subNode;
+      }
+      if (n !== name) { node.dirs.delete(name); node.dirs.set(n, c); }
+    }
+  }
+  compress(root);
+  return root;
+}
+function aggregate(node) {
+  let a = { blocks: 0, seen: 0, reviewed: 0 };
+  for (const f of node.files) { a.blocks += f.blocks; a.seen += f.seen; a.reviewed += f.reviewed; }
+  for (const child of node.dirs.values()) {
+    const c = aggregate(child);
+    a.blocks += c.blocks; a.seen += c.seen; a.reviewed += c.reviewed;
+  }
+  node.agg = a;
+  return a;
+}
+function renderTree(list, node, prefix, indent) {
+  const dirs = [...node.dirs.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  for (const [name, child] of dirs) {
+    const full = prefix + name;
+    aggregate(child);
+    if (hideDone && child.agg.reviewed >= child.agg.blocks) continue;
+    const isClosed = collapsed.has(full);
+    const item = document.createElement("div");
+    item.className = "d-item";
+    item.style.paddingLeft = (8 + indent * 14) + "px";
+    const arrow = document.createElement("span");
+    arrow.className = "d-arrow"; arrow.textContent = isClosed ? "▸" : "▾";
+    const dn = document.createElement("span");
+    dn.className = "d-name"; dn.textContent = name + "/"; dn.title = full;
+    item.append(arrow, dn, makeBar(child.agg.reviewed, child.agg.seen, child.agg.blocks));
+    item.onclick = () => {
+      isClosed ? collapsed.delete(full) : collapsed.add(full);
+      saveCollapsed(); renderSidebar();
+    };
+    list.append(item);
+    if (!isClosed) renderTree(list, child, full + "/", indent + 1);
+  }
+  for (const f of node.files.sort((a, b) => a.path.localeCompare(b.path))) {
+    if (hideDone && f.reviewed >= f.blocks) continue;
+    list.append(makeFileItem(f, f.path.split("/").pop(), indent));
+  }
+}
+function renderSidebar() {
+  const q = $("filter").value.toLowerCase();
+  const list = $("filelist");
+  list.textContent = "";
+  if (q) {          // filtering: flat list, full paths
+    for (const f of meta.files) {
+      if (hideDone && f.reviewed >= f.blocks) continue;
+      if (!f.path.toLowerCase().includes(q)) continue;
+      list.append(makeFileItem(f, (f.old_path ? f.old_path + " → " : "") + f.path, 0));
+    }
+  } else {
+    renderTree(list, buildTree(meta.files), "", 0);
+  }
+  const s = meta.stats;
+  $("sb-stats").textContent =
+    `${s.reviewed}/${s.blocks} reviewed · ${s.seen + s.reviewed} seen · ${meta.files.length} files`;
+  $("sb-progress").firstElementChild.style.width = (100 * s.reviewed / (s.blocks || 1)) + "%";
+  $("sb-progress").lastElementChild.style.width = (100 * s.seen / (s.blocks || 1)) + "%";
+  const done = s.blocks > 0 && s.reviewed >= s.blocks;
+  if (allDone === null) allDone = done;          // no fanfare on page load
+  else if (done && !allDone) { allDone = true; celebrate(); }
+  else allDone = done;
+  $("sb-base").textContent =
+    `${meta.branch || "detached"} vs ${meta.base_ref} @ ${meta.base_sha} (${meta.base_date.slice(0, 10)})`;
+  const dirty = meta.dirty_files.length, conf = meta.conflicted_files.length;
+  const banner = $("dirty-banner");
+  if (dirty || conf) {
+    banner.style.display = "block";
+    banner.textContent = (dirty ? `${dirty} file${dirty > 1 ? "s" : ""} with uncommitted changes, not shown` : "")
+      + (conf ? ` · ${conf} conflicted (skipped)` : "");
+    banner.title = meta.dirty_files.concat(meta.conflicted_files).join("\n");
+  } else banner.style.display = "none";
+}
+function bumpStats(f, dSeen, dRev) {
+  f.seen = Math.max(0, Math.min(f.blocks, f.seen + dSeen));
+  f.reviewed = Math.max(0, Math.min(f.blocks, f.reviewed + dRev));
+  meta.stats.seen = Math.max(0, meta.stats.seen + dSeen);
+  meta.stats.reviewed = Math.max(0, meta.stats.reviewed + dRev);
+  renderSidebar();
+}
+
+/* ---------- file loading ---------- */
+async function loadMeta() {
+  meta = await api("GET", "/api/files");
+  $("btn-hide").style.opacity = hideDone ? 1 : .55;
+  renderSidebar();
+}
+async function openFile(path, focusLine) {
+  file = await api("GET", "/api/file?path=" + encodeURIComponent(path));
+  curPath = path;
+  selAnchor = selEnd = null; dwell.clear();
+  clearRows();
+  $("empty-msg")?.remove();
+  const rowsOf = new Map();
+  file.lines.forEach((l, i) => {
+    if (l.h) { if (!rowsOf.has(l.h)) rowsOf.set(l.h, [i, i]); else rowsOf.get(l.h)[1] = i; }
+  });
+  blocks = file.blocks.map(b => {
+    const r = rowsOf.get(b.hunk_id) || [0, Math.max(0, file.lines.length - 1)];
+    return Object.assign({}, b, { r0: r[0], r1: r[1] });
+  }).sort((a, b) => a.r0 - b.r0);
+  blockByRow = new Array(file.lines.length).fill(-1);
+  blocks.forEach((b, i) => { for (let r = b.r0; r <= b.r1; r++) blockByRow[r] = i; });
+  focusIdx = blocks.findIndex(b => !b.reviewed);
+  if (focusIdx < 0) focusIdx = blocks.length ? 0 : -1;
+
+  $("tb-path").textContent = (file.old_path ? file.old_path + " → " : "") + path;
+  $("tb-info").textContent = `${file.total_lines} lines · ${file.lang}`
+    + (file.skip_reason ? ` · plain (${file.skip_reason})` : "")
+    + (file.status !== "modified" ? ` · ${file.status}` : "");
+  measureMetrics();
+  computeOffsets();
+  pane.scrollTop = focusLine
+    ? Math.max(0, offsets[Math.min(focusLine - 1, file.lines.length - 1)] - pane.clientHeight / 3)
+    : 0;
+  renderSidebar();
+  renderRows(); drawMinimap();
+  history.replaceState(null, "", "#f=" + encodeURIComponent(path));
+}
+
+/* ---------- geometry: monospace wrap is exactly computable ----------
+   Rows soft-wrap (word-break: break-all forces breaks at column
+   boundaries), so row i's height is ceil(cols(text)/colsPerRow) * LH.
+   offsets[] is the prefix sum; all scroll math reads it. */
+let offsets = [0];       // offsets[i] = y of row i; offsets[n] = total height
+let charW = 8, gutterPx = 100;
+function measureMetrics() {
+  const probe = document.createElement("div");
+  probe.className = "row";
+  probe.style.visibility = "hidden";
+  probe.innerHTML = '<span class="ln old">0</span><span class="ln new">0</span>'
+    + '<span class="chk"> </span><span class="sign"> </span>'
+    + '<pre class="content">' + "0".repeat(200) + '</pre>';
+  spacer.append(probe);
+  const content = probe.querySelector(".content");
+  gutterPx = content.getBoundingClientRect().left - probe.getBoundingClientRect().left;
+  const range = document.createRange();
+  range.selectNodeContents(content);
+  charW = range.getBoundingClientRect().width / 200 || 7.5;
+  probe.remove();
+}
+function displayCols(text) {
+  let col = 0;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c === 9) col += 4 - (col % 4);           // tab-size: 4
+    else if (c >= 0x2e80 && c <= 0xa4cf || c >= 0xac00 && c <= 0xd7a3
+             || c >= 0xf900 && c <= 0xfaff || c >= 0xff00 && c <= 0xff60)
+      col += 2;                                  // wide CJK forms
+    else col += 1;
+  }
+  return col;
+}
+function rowText(l) { return l.t ? l.t.map(t => t[1]).join("") : (l.text ?? ""); }
+function computeOffsets() {
+  if (!file) return;
+  const avail = Math.max(1, pane.clientWidth - gutterPx - 14);
+  const cols = Math.max(20, Math.floor(avail / charW));
+  const n = file.lines.length;
+  offsets = new Array(n + 1);
+  offsets[0] = 0;
+  for (let i = 0; i < n; i++) {
+    const c = displayCols(rowText(file.lines[i]));
+    offsets[i + 1] = offsets[i] + Math.max(1, Math.ceil(c / cols)) * LH;
+  }
+  spacer.style.height = (offsets[n] + 40) + "px";
+}
+function totalHeight() { return offsets[offsets.length - 1] + 40; }
+function findRow(y) {           // last row whose top <= y
+  let lo = 0, hi = offsets.length - 2;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (offsets[mid] <= y) lo = mid; else hi = mid - 1;
+  }
+  return lo;
+}
+
+/* ---------- virtualized rendering ---------- */
+let rowEls = new Map();  // rowIdx -> element
+function renderRows() {
+  if (!file || !file.lines.length) return;
+  const lines = file.lines;
+  const first = Math.max(0, findRow(pane.scrollTop) - 30);
+  const last = Math.min(lines.length - 1,
+                        findRow(pane.scrollTop + pane.clientHeight) + 30);
+  for (const [i, el] of rowEls) {
+    if (i < first || i > last) { el.remove(); rowEls.delete(i); }
+  }
+  const focusB = focusIdx >= 0 ? blocks[focusIdx] : null;
+  const s0 = selAnchor === null ? -1 : Math.min(selAnchor, selEnd);
+  const s1 = selAnchor === null ? -1 : Math.max(selAnchor, selEnd);
+  for (let i = first; i <= last; i++) {
+    let el = rowEls.get(i);
+    if (!el) { el = buildRow(i); rowEls.set(i, el); spacer.append(el); }
+    el.style.top = offsets[i] + "px";
+    el.style.height = (offsets[i + 1] - offsets[i]) + "px";
+    el.classList.toggle("focused-block",
+      !!focusB && i >= focusB.r0 && i <= focusB.r1);
+    el.classList.toggle("selected", i >= s0 && i <= s1);
+    const bi = blockByRow[i];
+    const chk = el.querySelector(".chk");
+    if (chk && chk.dataset.active && bi >= 0) {
+      chk.classList.toggle("reviewed", !!blocks[bi].reviewed);
+      chk.textContent = blocks[bi].reviewed ? "☑" : "☐";
+    }
+  }
+}
+function buildRow(i) {
+  const l = file.lines[i];
+  const el = document.createElement("div");
+  el.className = "row " + l.type;
+  const lnOld = document.createElement("span");
+  lnOld.className = "ln old"; lnOld.textContent = l.old ?? "";
+  const lnNew = document.createElement("span");
+  lnNew.className = "ln new"; lnNew.textContent = l.new ?? "";
+  lnNew.dataset.row = lnOld.dataset.row = i;
+  const chk = document.createElement("span");
+  chk.className = "chk";
+  const bi = blockByRow[i];
+  if (bi >= 0 && i === blocks[bi].r0) {
+    chk.dataset.active = "1";
+    chk.title = "toggle reviewed (R)";
+    chk.onclick = () => toggleReviewed(bi);
+  } else chk.textContent = " ";
+  const sign = document.createElement("span");
+  sign.className = "sign";
+  sign.textContent = l.type === "add" ? "+" : l.type === "del" ? "−" : " ";
+  const content = document.createElement("pre");
+  content.className = "content hl";
+  if (l.t) for (const [cls, text] of l.t) {
+    if (cls) { const sp = document.createElement("span"); sp.className = cls;
+               sp.textContent = text; content.append(sp); }
+    else content.append(text);
+  } else content.textContent = l.text ?? "";
+  el.append(lnOld, lnNew, chk, sign, content);
+  return el;
+}
+function clearRows() { for (const el of rowEls.values()) el.remove(); rowEls.clear(); }
+
+/* ---------- minimap ---------- */
+function mmColor(kind) {
+  const cs = getComputedStyle(document.documentElement);
+  return (kind === "add" ? cs.getPropertyValue("--add-sign")
+        : kind === "del" ? cs.getPropertyValue("--del-sign")
+        : cs.getPropertyValue("--mixed")).trim();
+}
+function drawMinimap() {
+  const dpr = devicePixelRatio || 1;
+  const w = mm.clientWidth, h = mm.clientHeight;
+  if (!w || !h) return;
+  if (mm.width !== Math.round(w * dpr)) { mm.width = Math.round(w * dpr); mm.height = Math.round(h * dpr); }
+  const ctx = mm.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  if (!file || !file.lines.length) return;
+  const T = totalHeight();
+  for (const b of blocks) {
+    const y = offsets[b.r0] / T * h;
+    const bh = Math.max(3, (offsets[b.r1 + 1] - offsets[b.r0]) / T * h);
+    const col = mmColor(b.kind);
+    if (b.reviewed) {                      // hollow outline only
+      ctx.strokeStyle = col; ctx.lineWidth = 1;
+      ctx.strokeRect(2.5, y + .5, w - 5, Math.max(2, bh - 1));
+    } else {
+      ctx.globalAlpha = b.seen ? .45 : 1;  // seen = faded, unseen = full
+      ctx.fillStyle = col;
+      ctx.fillRect(2, y, w - 4, bh);
+      ctx.globalAlpha = 1;
+    }
+  }
+  const y0 = pane.scrollTop / T * h;
+  const y1 = (pane.scrollTop + pane.clientHeight) / T * h;
+  ctx.fillStyle = getComputedStyle(document.documentElement)
+                  .getPropertyValue("--fg").trim();
+  ctx.globalAlpha = .12;
+  ctx.fillRect(0, y0, w, Math.max(4, y1 - y0));
+  ctx.globalAlpha = 1;
+}
+mm.addEventListener("click", e => {
+  if (!file) return;
+  const h = mm.clientHeight, T = totalHeight();
+  const y = e.offsetY;
+  for (let i = 0; i < blocks.length; i++) {  // click on a mark -> jump to block
+    const b = blocks[i];
+    const by = offsets[b.r0] / T * h;
+    const bh = Math.max(3, (offsets[b.r1 + 1] - offsets[b.r0]) / T * h);
+    if (y >= by - 2 && y <= by + bh + 2) { focusBlock(i); return; }
+  }
+  pane.scrollTop = y / h * T - pane.clientHeight / 2;
+});
+
+/* ---------- review state ---------- */
+function setLocal(b, seen, reviewed) {
+  const f = meta.files.find(x => x.path === curPath);
+  const wasSeen = b.seen && !b.reviewed, wasRev = !!b.reviewed;
+  b.seen = seen; b.reviewed = reviewed;
+  const isSeen = seen && !reviewed, isRev = reviewed;
+  if (f) bumpStats(f, (isSeen ? 1 : 0) - (wasSeen ? 1 : 0), (isRev ? 1 : 0) - (wasRev ? 1 : 0));
+  renderRows(); drawMinimap();
+}
+function toggleReviewed(bi) {
+  const b = blocks[bi];
+  if (!b) return;
+  if (b.reviewed) {
+    api("DELETE", `/api/reviewed?path=${encodeURIComponent(curPath)}&hunk_id=${encodeURIComponent(b.hunk_id)}`);
+    setLocal(b, true, false);          // demote to seen, never unseen
+  } else {
+    api("POST", "/api/reviewed", { blocks: [{ path: curPath, hunk_id: b.hunk_id }] });
+    setLocal(b, true, true);
+  }
+}
+function toggleFileReviewed(f) {
+  const done = f.reviewed >= f.blocks;
+  if (done) {
+    api("DELETE", "/api/reviewed?file=" + encodeURIComponent(f.path));
+    if (f.path === curPath) blocks.forEach(b => { b.reviewed = false; b.seen = true; });
+    meta.stats.reviewed -= f.reviewed; meta.stats.seen += f.reviewed;
+    f.seen = f.blocks; f.reviewed = 0;
+  } else {
+    api("POST", "/api/reviewed", { file: f.path });
+    if (f.path === curPath) blocks.forEach(b => { b.reviewed = true; b.seen = true; });
+    meta.stats.reviewed += f.blocks - f.reviewed;
+    meta.stats.seen -= f.seen;
+    f.reviewed = f.blocks; f.seen = 0;
+  }
+  renderSidebar(); renderRows(); drawMinimap();
+}
+function reviewSeenInFile() {   // V
+  const targets = blocks.filter(b => b.seen && !b.reviewed);
+  if (!targets.length) { toast("nothing seen-but-unreviewed"); return; }
+  api("POST", "/api/reviewed",
+      { blocks: targets.map(b => ({ path: curPath, hunk_id: b.hunk_id })) });
+  targets.forEach(b => setLocal(b, true, true));
+  toast(`${targets.length} block${targets.length > 1 ? "s" : ""} reviewed`);
+}
+
+/* ---------- auto-seen: scroll math, dwell, batching ---------- */
+function evalSeen() {
+  if (!file || !meta.auto_seen || !document.hasFocus()) { dwell.clear(); return; }
+  const top = pane.scrollTop, bot = pane.scrollTop + pane.clientHeight;
+  const now = performance.now();
+  blocks.forEach((b, i) => {
+    if (b.seen || b.reviewed) return;
+    if (offsets[b.r1 + 1] < top) { markSeen(b); return; }        // scrolled past
+    if (offsets[b.r0] >= top && offsets[b.r1 + 1] <= bot) {      // fully visible
+      if (!dwell.has(i)) dwell.set(i, now);
+      else if (now - dwell.get(i) >= 500) markSeen(b);
+    } else dwell.delete(i);
+  });
+}
+function markSeen(b) {
+  seenQueue.set(curPath + "|" + b.hunk_id, { path: curPath, hunk_id: b.hunk_id });
+  setLocal(b, true, false);
+}
+function flushSeen(beacon) {
+  if (!seenQueue.size) return;
+  const payload = JSON.stringify({ blocks: [...seenQueue.values()] });
+  seenQueue.clear();
+  if (beacon && navigator.sendBeacon) {
+    navigator.sendBeacon("/api/seen", new Blob([payload], { type: "application/json" }));
+  } else {
+    fetch("/api/seen", { method: "POST", body: payload,
+                         headers: { "content-type": "application/json" } });
+  }
+}
+setInterval(() => { evalSeen(); flushSeen(false); }, 2000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") flushSeen(true);
+});
+
+/* ---------- navigation ---------- */
+function focusBlock(bi) {
+  if (bi < 0 || bi >= blocks.length) return;
+  focusIdx = bi;
+  const b = blocks[bi];
+  pane.scrollTop = Math.max(0, offsets[b.r0] - pane.clientHeight / 3); // 1/3 height
+  renderRows(); drawMinimap();
+}
+function nextBlock(dir) {
+  if (!blocks.length) return;
+  focusBlock(Math.min(blocks.length - 1, Math.max(0, focusIdx + dir)));
+}
+function fileIndex() { return meta.files.findIndex(f => f.path === curPath); }
+function visibleFiles() {
+  return meta.files.filter(f => !(hideDone && f.reviewed >= f.blocks));
+}
+function nextFile(dir) {
+  const vis = visibleFiles();
+  if (!vis.length) return;
+  const i = vis.findIndex(f => f.path === curPath);
+  const j = i < 0 ? (dir > 0 ? 0 : vis.length - 1)
+                  : Math.min(vis.length - 1, Math.max(0, i + dir));
+  if (vis[j].path !== curPath) openFile(vis[j].path);
+}
+async function nextUnreviewed(dir) {   // n / N — crosses file boundaries
+  if (file) {
+    const order = blocks.map((b, i) => i).filter(i => !blocks[i].reviewed &&
+      (dir > 0 ? i > focusIdx : i < focusIdx));
+    if (order.length) { focusBlock(dir > 0 ? order[0] : order[order.length - 1]); return; }
+  }
+  const files = meta.files, start = Math.max(0, fileIndex());
+  for (let k = 1; k <= files.length; k++) {
+    const j = ((start + dir * k) % files.length + files.length) % files.length;
+    if (files[j].reviewed < files[j].blocks) {
+      await openFile(files[j].path);
+      const cand = blocks.map((b, i) => i).filter(i => !blocks[i].reviewed);
+      if (cand.length) focusBlock(dir > 0 ? cand[0] : cand[cand.length - 1]);
+      return;
+    }
+  }
+  toast("everything reviewed 🎉");
+}
+
+/* ---------- line refs ---------- */
+function refRangeFromRows(r0, r1) {
+  const news = [];
+  let lastNewBefore = 0;
+  for (let i = 0; i <= r1 && i < file.lines.length; i++) {
+    const l = file.lines[i];
+    if (l.new) { if (i < r0) lastNewBefore = l.new; else news.push(l.new); }
+  }
+  if (news.length) return { a: news[0], b: news[news.length - 1], deleted: false };
+  return { a: Math.max(1, lastNewBefore), b: Math.max(1, lastNewBefore), deleted: true };
+}
+function refString(r) { return curPath + ":" + (r.a === r.b ? r.a : r.a + "-" + r.b); }
+function copyGutterSelection() {
+  const r0 = Math.min(selAnchor, selEnd), r1 = Math.max(selAnchor, selEnd);
+  const r = refRangeFromRows(r0, r1);
+  copyText(refString(r), refString(r) + (r.deleted ? " (deleted lines)" : ""));
+}
+function copyRefWithContent() {   // y
+  let r0, r1;
+  if (selAnchor !== null) { r0 = Math.min(selAnchor, selEnd); r1 = Math.max(selAnchor, selEnd); }
+  else if (focusIdx >= 0) { r0 = blocks[focusIdx].r0; r1 = blocks[focusIdx].r1; }
+  else { toast("nothing selected"); return; }
+  const r = refRangeFromRows(r0, r1);
+  const body = file.lines.slice(r0, r1 + 1)
+    .map(l => (l.t ? l.t.map(t => t[1]).join("") : l.text ?? "")).join("\n");
+  const text = refString(r) + (r.deleted ? " (deleted lines)" : "")
+    + "\n```" + (file.lang || "") + "\n" + body + "\n```\n";
+  copyText(text, "ref + " + (r1 - r0 + 1) + " lines");
+}
+function copyUnreviewedRefs() {   // Y
+  const un = blocks.filter(b => !b.reviewed);
+  if (!un.length) { toast("no unreviewed blocks"); return; }
+  const refs = un.map(b => refString(refRangeFromRows(b.r0, b.r1)));
+  copyText(refs.join("\n"), un.length + " refs");
+}
+let dragging = false;
+pane.addEventListener("mousedown", e => {
+  const ln = e.target.closest(".ln");
+  if (!ln) return;
+  e.preventDefault();
+  const row = +ln.dataset.row;
+  if (e.shiftKey && selAnchor !== null) selEnd = row;
+  else { selAnchor = row; selEnd = row; }
+  dragging = true;
+  renderRows();
+});
+pane.addEventListener("mousemove", e => {
+  if (!dragging) return;
+  const ln = e.target.closest(".ln");
+  if (ln) { selEnd = +ln.dataset.row; renderRows(); }
+});
+addEventListener("mouseup", () => {
+  if (!dragging) return;
+  dragging = false;
+  copyGutterSelection();
+});
+
+/* ---------- sidebar resize ---------- */
+{
+  const sb = $("sidebar"), rz = $("sb-resizer");
+  const saved = parseInt(localStorage.getItem("seendiff.sbw") || "0", 10);
+  if (saved) sb.style.width = saved + "px";
+  let resizing = false;
+  rz.addEventListener("mousedown", e => {
+    e.preventDefault();
+    resizing = true;
+    rz.classList.add("active");
+    document.body.style.cursor = "col-resize";
+  });
+  addEventListener("mousemove", e => {
+    if (!resizing) return;
+    sb.style.width = e.clientX + "px";      // clamped by min/max-width in CSS
+  });
+  addEventListener("mouseup", () => {
+    if (!resizing) return;
+    resizing = false;
+    rz.classList.remove("active");
+    document.body.style.cursor = "";
+    localStorage.setItem("seendiff.sbw", sb.getBoundingClientRect().width | 0);
+    if (file) { computeOffsets(); renderRows(); drawMinimap(); }  // pane width changed
+  });
+}
+
+/* ---------- theme & font ---------- */
+function setTheme(t) {
+  document.documentElement.dataset.theme = t;
+  localStorage.setItem("seendiff.theme", t);
+  $("btn-theme").textContent = t;
+  drawMinimap();
+}
+function setFont(f) {
+  document.documentElement.style.setProperty("--mono-font", `'${f}'`);
+  localStorage.setItem("seendiff.font", f);
+  $("btn-font").textContent = f === "JetBrains Mono" ? "JB Mono" : "Ubuntu Mono";
+  document.fonts.ready.then(() => {
+    if (file) { measureMetrics(); computeOffsets(); renderRows(); drawMinimap(); }
+  });
+}
+$("btn-theme").onclick = () =>
+  setTheme(THEMES[(THEMES.indexOf(document.documentElement.dataset.theme) + 1) % THEMES.length]);
+$("btn-font").onclick = () => {
+  const cur = localStorage.getItem("seendiff.font") || FONTS[0];
+  setFont(FONTS[(FONTS.indexOf(cur) + 1) % FONTS.length]);
+};
+function askResetAll() {
+  const s = meta.stats;
+  $("confirm-msg").textContent =
+    `Reset review state for this branch? ${s.reviewed} reviewed and `
+    + `${s.seen} seen marks across ${meta.files.length} files will be cleared.`;
+  $("confirm-overlay").classList.add("show");
+}
+async function doResetAll() {
+  $("confirm-overlay").classList.remove("show");
+  await api("DELETE", "/api/state");
+  seenQueue.clear(); dwell.clear();
+  meta.stats.seen = 0; meta.stats.reviewed = 0;
+  meta.files.forEach(f => { f.seen = 0; f.reviewed = 0; });
+  blocks.forEach(b => { b.seen = false; b.reviewed = false; });
+  renderSidebar(); renderRows(); drawMinimap();
+  toast("review state reset");
+}
+$("confirm-yes").onclick = doResetAll;
+$("confirm-no").onclick = () => $("confirm-overlay").classList.remove("show");
+$("confirm-overlay").onclick = e => {
+  if (e.target === $("confirm-overlay")) $("confirm-overlay").classList.remove("show");
+};
+function toggleHelp(force) {
+  $("help-overlay").classList.toggle("show", force);
+}
+$("btn-keys").onclick = () => toggleHelp();
+$("help-overlay").onclick = e => { if (e.target === $("help-overlay")) toggleHelp(false); };
+$("btn-hide").onclick = () => {
+  hideDone = !hideDone;
+  localStorage.setItem("seendiff.hide", hideDone ? "1" : "0");
+  $("btn-hide").style.opacity = hideDone ? 1 : .55;
+  renderSidebar();
+};
+
+/* ---------- keymap (PLAN.md §12) ---------- */
+addEventListener("keydown", e => {
+  if (e.target === $("filter")) {
+    if (e.key === "Escape") $("filter").blur();
+    if (e.key === "Enter") {
+      const vis = visibleFiles().filter(f =>
+        f.path.toLowerCase().includes($("filter").value.toLowerCase()));
+      if (vis.length) { openFile(vis[0].path); $("filter").blur(); }
+    }
+    return;
+  }
+  if (e.target.tagName === "INPUT" || e.ctrlKey || e.metaKey || e.altKey) return;
+  const k = e.key;
+  const stop = () => e.preventDefault();
+  const confirming = $("confirm-overlay").classList.contains("show");
+  if (k === "Escape") {
+    toggleHelp(false); $("confirm-overlay").classList.remove("show"); return;
+  }
+  if (confirming) {
+    if (k === "Enter") { stop(); doResetAll(); }
+    return;                                  // swallow everything else
+  }
+  if (k === "?") { stop(); toggleHelp(); return; }
+  if ($("help-overlay").classList.contains("show")) return;
+  if (k === "X") { stop(); askResetAll(); return; }
+  if (k === "ArrowLeft") { stop(); nextBlock(-1); }
+  else if (k === "ArrowRight") { stop(); nextBlock(1); }
+  else if (k === "ArrowUp") { stop(); nextFile(-1); }
+  else if (k === "ArrowDown") { stop(); nextFile(1); }
+  else if (k === "R") { stop(); if (focusIdx >= 0) {
+      const wasRev = blocks[focusIdx].reviewed;
+      toggleReviewed(focusIdx);
+      if (!wasRev) nextUnreviewed(1);
+    } }
+  else if (k === "n") { stop(); nextUnreviewed(1); }
+  else if (k === "N") { stop(); nextUnreviewed(-1); }
+  else if (k === "j") pane.scrollTop += LH * 3;
+  else if (k === "k") pane.scrollTop -= LH * 3;
+  else if (k === "d") pane.scrollTop += pane.clientHeight / 2;
+  else if (k === "u") pane.scrollTop -= pane.clientHeight / 2;
+  else if (k === "V") { stop(); reviewSeenInFile(); }
+  else if (k === "f") { stop();
+      const f = meta.files.find(x => x.path === curPath);
+      if (f && f.reviewed < f.blocks) toggleFileReviewed(f);
+      nextFile(1); }
+  else if (k === "y") { stop(); copyRefWithContent(); }
+  else if (k === "Y") { stop(); copyUnreviewedRefs(); }
+  else if (k === "g") { stop(); $("filter").focus(); $("filter").select(); }
+  else if (k === "h") { stop(); $("btn-hide").onclick(); }
+  else if (k === "t") { stop(); $("btn-theme").onclick(); }
+});
+
+/* ---------- wiring ---------- */
+let rafPending = false;
+pane.addEventListener("scroll", () => {
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => {
+    rafPending = false;
+    renderRows(); drawMinimap(); evalSeen();
+    if (curPath && file) history.replaceState(null, "",
+      "#f=" + encodeURIComponent(curPath) + "&l=" + (findRow(pane.scrollTop) + 1));
+  });
+});
+addEventListener("resize", () => {
+  if (file) { computeOffsets(); }
+  renderRows(); drawMinimap();
+});
+// wrap geometry depends on real glyph metrics: remeasure once webfonts land
+document.fonts.ready.then(() => {
+  if (file) { measureMetrics(); computeOffsets(); renderRows(); drawMinimap(); }
+});
+$("filter").addEventListener("input", renderSidebar);
+
+(async function init() {
+  setTheme(document.documentElement.dataset.theme);
+  setFont(localStorage.getItem("seendiff.font") || FONTS[0]);
+  await loadMeta();
+  if (!meta.files.length) {
+    $("tb-path").textContent = "nothing to review";
+    const d = document.createElement("div");
+    d.id = "empty-msg";
+    d.textContent = `No committed changes between ${meta.base_ref} and HEAD. `
+      + `Commit your work, or pass a different base ref.`;
+    pane.append(d);
+    return;
+  }
+  const h = new URLSearchParams(location.hash.slice(1));
+  const start = h.get("f");
+  if (start && meta.files.some(f => f.path === start)) {
+    await openFile(start, +(h.get("l") || 0) || undefined);
+  } else {
+    await openFile(meta.files[0].path);
+  }
+})();
+</script>
+</body>
+</html>
