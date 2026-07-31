@@ -152,6 +152,17 @@ button:hover { border-color: var(--accent); }
 .chk:hover { color: var(--accent); }
 .content { flex: 1; min-width: 0; font-family: inherit; font-size: inherit;
   white-space: pre-wrap; word-break: break-all; tab-size: 4; }
+
+/* ---- side-by-side ---- */
+.row.split { align-items: stretch; }
+.row.split .half { flex: 1 1 0; min-width: 0; display: flex; align-items: flex-start; }
+.row.split .half.left { border-right: 1px solid var(--border); }
+.row.split .half.add { background: var(--add-bg); }
+.row.split .half.del { background: var(--del-bg); }
+.row.split .half.empty { background: color-mix(in srgb, var(--fg) 5%, transparent); }
+.row.split .half.add .sign { color: var(--add-sign); }
+.row.split .half.del .sign { color: var(--del-sign); }
+.row.split.selected .half { background: var(--sel-bg); }
 #empty-msg { padding: 48px; color: var(--fg-dim); font-size: 14px;
   font-family: system-ui, sans-serif; }
 
@@ -209,6 +220,7 @@ button:hover { border-color: var(--accent); }
     <span id="tb-path">no file open</span>
     <span id="tb-info"></span>
     <span id="tb-sp"></span>
+    <button id="btn-split" title="side-by-side / unified (s)">unified</button>
     <button id="btn-hide" title="hide fully-reviewed files (h)">hide ✓</button>
     <button id="btn-font" title="toggle font"></button>
     <button id="btn-theme" title="cycle theme (t)"></button>
@@ -233,6 +245,7 @@ button:hover { border-color: var(--accent); }
       <tr><td>f</td><td>mark whole file reviewed, next file</td></tr>
       <tr><td>y</td><td>copy ref + content (selection or focused block)</td></tr>
       <tr><td>Y</td><td>copy refs for all unreviewed blocks in file</td></tr>
+      <tr><td>s</td><td>toggle side-by-side / unified</td></tr>
       <tr><td>g</td><td>focus file filter</td></tr>
       <tr><td>h</td><td>hide fully-reviewed files</td></tr>
       <tr><td>t</td><td>cycle theme</td></tr>
@@ -264,12 +277,21 @@ const FONTS = ["JetBrains Mono", "Ubuntu Sans Mono"];
 
 let meta = null;          // /api/files payload
 let file = null;          // /api/file payload for the open file
-let blocks = [];          // file.blocks + row ranges, in row order
-let blockByRow = [];      // rowIdx -> block index or -1
+let blocks = [];          // file.blocks + line ranges (l0/l1) and view ranges (r0/r1)
+let blockByRow = [];      // view row idx -> block index or -1
 let curPath = null;
 let focusIdx = -1;        // focused block index
 let hideDone = localStorage.getItem("seendiff.hide") === "1";
-let selAnchor = null, selEnd = null;   // gutter selection, row indices
+let selAnchor = null, selEnd = null;   // gutter selection, view row indices
+
+/* ---------- view space ----------
+   file.lines[] is the diff's line list; the viewer draws *view rows*. Unified:
+   one view row per line. Split: a del and its paired add share one view row.
+   viewRows[v] = [leftLineIdx|null, rightLineIdx|null]; viewOf[] is the inverse.
+   All geometry, selection, dwell and block ranges live in view space. */
+let split = localStorage.getItem("seendiff.split") === "1";
+let viewRows = [];
+let viewOf = [];
 let seenQueue = new Map();             // "path|id" -> {path, hunk_id}
 let dwell = new Map();                 // block idx -> first-fully-visible ts
 
@@ -517,10 +539,10 @@ async function openFile(path, focusLine) {
   });
   blocks = file.blocks.map(b => {
     const r = rowsOf.get(b.hunk_id) || [0, Math.max(0, file.lines.length - 1)];
-    return Object.assign({}, b, { r0: r[0], r1: r[1] });
-  }).sort((a, b) => a.r0 - b.r0);
-  blockByRow = new Array(file.lines.length).fill(-1);
-  blocks.forEach((b, i) => { for (let r = b.r0; r <= b.r1; r++) blockByRow[r] = i; });
+    return Object.assign({}, b, { l0: r[0], l1: r[1] });
+  }).sort((a, b) => a.l0 - b.l0);
+  buildView();
+  computeBlockRanges();
   focusIdx = blocks.findIndex(b => !b.reviewed);
   if (focusIdx < 0) focusIdx = blocks.length ? 0 : -1;
 
@@ -531,19 +553,76 @@ async function openFile(path, focusLine) {
   measureMetrics();
   computeOffsets();
   pane.scrollTop = focusLine
-    ? Math.max(0, offsets[Math.min(focusLine - 1, file.lines.length - 1)] - pane.clientHeight / 3)
+    ? Math.max(0, offsets[viewOf[Math.min(focusLine - 1, file.lines.length - 1)]]
+                  - pane.clientHeight / 3)
     : 0;
   renderSidebar();
   renderRows(); drawMinimap();
   history.replaceState(null, "", "#f=" + encodeURIComponent(path));
 }
 
+/* ---------- view rows ----------
+   Pairing rule: context lines occupy both sides of one view row; inside a
+   contiguous del-run/add-run they zip positionally, and the leftover on
+   either side gets an empty cell opposite it. */
+function buildView() {
+  const n = file.lines.length;
+  viewRows = [];
+  viewOf = new Array(n).fill(0);
+  if (!split) {
+    for (let i = 0; i < n; i++) { viewOf[i] = i; viewRows.push([i, null]); }
+    return;
+  }
+  let dels = [], adds = [];
+  const flush = () => {
+    for (let k = 0; k < Math.max(dels.length, adds.length); k++) {
+      const L = k < dels.length ? dels[k] : null;
+      const R = k < adds.length ? adds[k] : null;
+      if (L !== null) viewOf[L] = viewRows.length;
+      if (R !== null) viewOf[R] = viewRows.length;
+      viewRows.push([L, R]);
+    }
+    dels = []; adds = [];
+  };
+  for (let i = 0; i < n; i++) {
+    const t = file.lines[i].type;
+    if (t === "del") dels.push(i);
+    else if (t === "add") adds.push(i);
+    else { flush(); viewOf[i] = viewRows.length; viewRows.push([i, i]); }
+  }
+  flush();
+}
+function computeBlockRanges() {
+  for (const b of blocks) {
+    let lo = Infinity, hi = -Infinity;
+    for (let i = b.l0; i <= b.l1 && i < viewOf.length; i++) {
+      const v = viewOf[i];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    b.r0 = lo === Infinity ? 0 : lo;
+    b.r1 = hi === -Infinity ? 0 : hi;
+  }
+  blockByRow = new Array(viewRows.length).fill(-1);
+  blocks.forEach((b, i) => { for (let r = b.r0; r <= b.r1; r++) blockByRow[r] = i; });
+}
+function viewLines(v0, v1) {      // sorted line indices covered by view rows v0..v1
+  const s = new Set();
+  for (let v = Math.max(0, v0); v <= Math.min(v1, viewRows.length - 1); v++)
+    for (const idx of viewRows[v]) if (idx !== null) s.add(idx);
+  return [...s].sort((a, b) => a - b);
+}
+function firstLineOf(v) {
+  const vr = viewRows[v];
+  return vr ? (vr[0] ?? vr[1] ?? 0) : 0;
+}
+
 /* ---------- geometry: monospace wrap is exactly computable ----------
    Rows soft-wrap (word-break: break-all forces breaks at column
    boundaries), so row i's height is ceil(cols(text)/colsPerRow) * LH.
    offsets[] is the prefix sum; all scroll math reads it. */
-let offsets = [0];       // offsets[i] = y of row i; offsets[n] = total height
-let charW = 8, gutterPx = 100;
+let offsets = [0];       // offsets[v] = y of view row v; offsets[n] = total height
+let charW = 8, padPx = 114, splitPadPx = 150;
 function measureMetrics() {
   const probe = document.createElement("div");
   probe.className = "row";
@@ -553,11 +632,29 @@ function measureMetrics() {
     + '<pre class="content">' + "0".repeat(200) + '</pre>';
   spacer.append(probe);
   const content = probe.querySelector(".content");
-  gutterPx = content.getBoundingClientRect().left - probe.getBoundingClientRect().left;
+  // the probe string is far wider than the pane: it must not soft-wrap, or the
+  // range below measures the wrapped block's width and charW comes out garbage
+  content.style.whiteSpace = "pre";
   const range = document.createRange();
   range.selectNodeContents(content);
   charW = range.getBoundingClientRect().width / 200 || 7.5;
+  content.style.whiteSpace = "";
+  // everything that isn't content width: gutters, sign, checkbox, padding
+  padPx = probe.getBoundingClientRect().width - content.getBoundingClientRect().width;
   probe.remove();
+
+  const sp = document.createElement("div");
+  sp.className = "row split";
+  sp.style.visibility = "hidden";
+  sp.innerHTML = '<span class="chk"> </span>'
+    + '<div class="half left"><span class="ln old">0</span>'
+    + '<span class="sign"> </span><pre class="content">0</pre></div>'
+    + '<div class="half right"><span class="ln new">0</span>'
+    + '<span class="sign"> </span><pre class="content">0</pre></div>';
+  spacer.append(sp);
+  splitPadPx = sp.getBoundingClientRect().width
+    - 2 * sp.querySelector(".half.left .content").getBoundingClientRect().width;
+  sp.remove();
 }
 function displayCols(text) {
   let col = 0;
@@ -574,16 +671,32 @@ function displayCols(text) {
 function rowText(l) { return l.t ? l.t.map(t => t[1]).join("") : (l.text ?? ""); }
 function computeOffsets() {
   if (!file) return;
-  const avail = Math.max(1, pane.clientWidth - gutterPx - 14);
-  const cols = Math.max(20, Math.floor(avail / charW));
-  const n = file.lines.length;
-  offsets = new Array(n + 1);
-  offsets[0] = 0;
-  for (let i = 0; i < n; i++) {
-    const c = displayCols(rowText(file.lines[i]));
-    offsets[i + 1] = offsets[i] + Math.max(1, Math.ceil(c / cols)) * LH;
+  // Two passes: setting the spacer height can make the vertical scrollbar
+  // appear (or go away), which changes clientWidth and thus the wrap width.
+  for (let pass = 0; pass < 2; pass++) {
+    const paneW = pane.clientWidth;
+    // split: the two sides share the pane, each with its own gutter
+    const avail = split
+      ? Math.max(1, (paneW - splitPadPx) / 2)
+      : Math.max(1, paneW - padPx);
+    // 1px margin absorbs subpixel advance-width rounding; the floor of 1 only
+    // guards against a degenerate pane (any higher and rows overlap there)
+    const cols = Math.max(1, Math.floor((avail - 1) / charW));
+    const n = viewRows.length;
+    offsets = new Array(n + 1);
+    offsets[0] = 0;
+    for (let v = 0; v < n; v++) {
+      let h = 1;
+      for (const idx of viewRows[v]) {
+        if (idx === null) continue;
+        const c = displayCols(rowText(file.lines[idx]));
+        h = Math.max(h, Math.ceil(c / cols));    // taller side sets row height
+      }
+      offsets[v + 1] = offsets[v] + h * LH;
+    }
+    spacer.style.height = (offsets[n] + 40) + "px";
+    if (pane.clientWidth === paneW) break;
   }
-  spacer.style.height = (offsets[n] + 40) + "px";
 }
 function totalHeight() { return offsets[offsets.length - 1] + 40; }
 function findRow(y) {           // last row whose top <= y
@@ -598,10 +711,9 @@ function findRow(y) {           // last row whose top <= y
 /* ---------- virtualized rendering ---------- */
 let rowEls = new Map();  // rowIdx -> element
 function renderRows() {
-  if (!file || !file.lines.length) return;
-  const lines = file.lines;
+  if (!file || !viewRows.length) return;
   const first = Math.max(0, findRow(pane.scrollTop) - 30);
-  const last = Math.min(lines.length - 1,
+  const last = Math.min(viewRows.length - 1,
                         findRow(pane.scrollTop + pane.clientHeight) + 30);
   for (const [i, el] of rowEls) {
     if (i < first || i > last) { el.remove(); rowEls.delete(i); }
@@ -625,35 +737,68 @@ function renderRows() {
     }
   }
 }
-function buildRow(i) {
-  const l = file.lines[i];
+function contentEl(l) {
+  const content = document.createElement("pre");
+  content.className = "content hl";
+  if (!l) return content;
+  if (l.t) for (const [cls, text] of l.t) {
+    if (cls) { const sp = document.createElement("span"); sp.className = cls;
+               sp.textContent = text; content.append(sp); }
+    else content.append(text);
+  } else content.textContent = l.text ?? "";
+  return content;
+}
+function chkEl(v) {
+  const chk = document.createElement("span");
+  chk.className = "chk";
+  const bi = blockByRow[v];
+  if (bi >= 0 && v === blocks[bi].r0) {
+    chk.dataset.active = "1";
+    chk.title = "toggle reviewed (R)";
+    chk.onclick = () => toggleReviewed(bi);
+  } else chk.textContent = " ";
+  return chk;
+}
+function buildRow(v) {
+  return split ? buildSplitRow(v) : buildUnifiedRow(v);
+}
+function buildUnifiedRow(v) {
+  const l = file.lines[viewRows[v][0]];
   const el = document.createElement("div");
   el.className = "row " + l.type;
   const lnOld = document.createElement("span");
   lnOld.className = "ln old"; lnOld.textContent = l.old ?? "";
   const lnNew = document.createElement("span");
   lnNew.className = "ln new"; lnNew.textContent = l.new ?? "";
-  lnNew.dataset.row = lnOld.dataset.row = i;
-  const chk = document.createElement("span");
-  chk.className = "chk";
-  const bi = blockByRow[i];
-  if (bi >= 0 && i === blocks[bi].r0) {
-    chk.dataset.active = "1";
-    chk.title = "toggle reviewed (R)";
-    chk.onclick = () => toggleReviewed(bi);
-  } else chk.textContent = " ";
+  lnNew.dataset.row = lnOld.dataset.row = v;
   const sign = document.createElement("span");
   sign.className = "sign";
   sign.textContent = l.type === "add" ? "+" : l.type === "del" ? "−" : " ";
-  const content = document.createElement("pre");
-  content.className = "content hl";
-  if (l.t) for (const [cls, text] of l.t) {
-    if (cls) { const sp = document.createElement("span"); sp.className = cls;
-               sp.textContent = text; content.append(sp); }
-    else content.append(text);
-  } else content.textContent = l.text ?? "";
-  el.append(lnOld, lnNew, chk, sign, content);
+  el.append(lnOld, lnNew, chkEl(v), sign, contentEl(l));
   return el;
+}
+function buildSplitRow(v) {
+  const el = document.createElement("div");
+  el.className = "row split";
+  el.append(chkEl(v), halfEl(v, "left"), halfEl(v, "right"));
+  return el;
+}
+function halfEl(v, side) {
+  const left = side === "left";
+  const idx = viewRows[v][left ? 0 : 1];
+  const l = idx === null ? null : file.lines[idx];
+  const h = document.createElement("div");
+  h.className = "half " + side + " "
+    + (l ? (l.type === "context" ? "ctx" : l.type) : "empty");
+  const ln = document.createElement("span");
+  ln.className = "ln " + (left ? "old" : "new");
+  ln.textContent = l ? ((left ? l.old : l.new) ?? "") : "";
+  if (l) ln.dataset.row = v;
+  const sign = document.createElement("span");
+  sign.className = "sign";
+  sign.textContent = !l || l.type === "context" ? " " : l.type === "add" ? "+" : "−";
+  h.append(ln, sign, contentEl(l));
+  return h;
 }
 function clearRows() { for (const el of rowEls.values()) el.remove(); rowEls.clear(); }
 
@@ -833,13 +978,14 @@ async function nextUnreviewed(dir) {   // n / N — crosses file boundaries
 
 /* ---------- line refs ---------- */
 function refRangeFromRows(r0, r1) {
-  const news = [];
-  let lastNewBefore = 0;
-  for (let i = 0; i <= r1 && i < file.lines.length; i++) {
-    const l = file.lines[i];
-    if (l.new) { if (i < r0) lastNewBefore = l.new; else news.push(l.new); }
-  }
+  const idxs = viewLines(r0, r1);
+  const news = idxs.map(i => file.lines[i].new).filter(Boolean);
   if (news.length) return { a: news[0], b: news[news.length - 1], deleted: false };
+  let lastNewBefore = 0;
+  for (let i = 0; i < (idxs.length ? idxs[0] : 0); i++) {
+    const l = file.lines[i];
+    if (l.new) lastNewBefore = l.new;
+  }
   return { a: Math.max(1, lastNewBefore), b: Math.max(1, lastNewBefore), deleted: true };
 }
 function refString(r) { return curPath + ":" + (r.a === r.b ? r.a : r.a + "-" + r.b); }
@@ -854,11 +1000,11 @@ function copyRefWithContent() {   // y
   else if (focusIdx >= 0) { r0 = blocks[focusIdx].r0; r1 = blocks[focusIdx].r1; }
   else { toast("nothing selected"); return; }
   const r = refRangeFromRows(r0, r1);
-  const body = file.lines.slice(r0, r1 + 1)
-    .map(l => (l.t ? l.t.map(t => t[1]).join("") : l.text ?? "")).join("\n");
+  const idxs = viewLines(r0, r1);
+  const body = idxs.map(i => rowText(file.lines[i])).join("\n");
   const text = refString(r) + (r.deleted ? " (deleted lines)" : "")
     + "\n```" + (file.lang || "") + "\n" + body + "\n```\n";
-  copyText(text, "ref + " + (r1 - r0 + 1) + " lines");
+  copyText(text, "ref + " + idxs.length + " lines");
 }
 function copyUnreviewedRefs() {   // Y
   const un = blocks.filter(b => !b.reviewed);
@@ -935,6 +1081,28 @@ $("btn-font").onclick = () => {
   const cur = localStorage.getItem("seendiff.font") || FONTS[0];
   setFont(FONTS[(FONTS.indexOf(cur) + 1) % FONTS.length]);
 };
+/* ---------- layout mode ---------- */
+function setSplit(on) {
+  split = on;
+  localStorage.setItem("seendiff.split", on ? "1" : "0");
+  $("btn-split").textContent = on ? "split" : "unified";
+  if (!file) return;
+  // anchor on the line at the top of the pane so the toggle doesn't lose place
+  const anchorView = findRow(pane.scrollTop);
+  const anchorLine = firstLineOf(anchorView);
+  const delta = pane.scrollTop - (offsets[anchorView] || 0);
+  selAnchor = selEnd = null;
+  dwell.clear();
+  buildView();
+  computeBlockRanges();
+  measureMetrics();
+  computeOffsets();
+  clearRows();
+  pane.scrollTop = Math.max(0, (offsets[viewOf[anchorLine]] || 0) + delta);
+  renderRows(); drawMinimap();
+}
+$("btn-split").onclick = () => setSplit(!split);
+
 function askResetAll() {
   const s = meta.stats;
   $("confirm-msg").textContent =
@@ -1016,6 +1184,7 @@ addEventListener("keydown", e => {
       nextFile(1); }
   else if (k === "y") { stop(); copyRefWithContent(); }
   else if (k === "Y") { stop(); copyUnreviewedRefs(); }
+  else if (k === "s") { stop(); setSplit(!split); }
   else if (k === "g") { stop(); $("filter").focus(); $("filter").select(); }
   else if (k === "h") { stop(); $("btn-hide").onclick(); }
   else if (k === "t") { stop(); $("btn-theme").onclick(); }
@@ -1029,8 +1198,9 @@ pane.addEventListener("scroll", () => {
   requestAnimationFrame(() => {
     rafPending = false;
     renderRows(); drawMinimap(); evalSeen();
+    // the hash carries a line index, not a view index, so it survives a toggle
     if (curPath && file) history.replaceState(null, "",
-      "#f=" + encodeURIComponent(curPath) + "&l=" + (findRow(pane.scrollTop) + 1));
+      "#f=" + encodeURIComponent(curPath) + "&l=" + (firstLineOf(findRow(pane.scrollTop)) + 1));
   });
 });
 addEventListener("resize", () => {
@@ -1043,9 +1213,12 @@ document.fonts.ready.then(() => {
 });
 $("filter").addEventListener("input", renderSidebar);
 
+
+
 (async function init() {
   setTheme(document.documentElement.dataset.theme);
   setFont(localStorage.getItem("seendiff.font") || FONTS[0]);
+  setSplit(split);
   await loadMeta();
   if (!meta.files.length) {
     $("tb-path").textContent = "nothing to review";
