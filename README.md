@@ -138,3 +138,7 @@ implementation are noted inline.
 
 Bundles [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) (Apache-2.0) and
 [Ubuntu Sans Mono](https://github.com/canonical/Ubuntu-Sans-fonts) (UFL-1.0).
+
+## Options
+
+<img width="1848" height="918" alt="image" src="https://github.com/user-attachments/assets/41525eb7-6938-4e71-8a45-17cff191b6b0" />
