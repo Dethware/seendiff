@@ -250,7 +250,25 @@ def create_app(st: AppState) -> FastAPI:
 
     @app.get("/")
     def index():
-        return FileResponse(STATIC / "index.html")
+        # prefs are inlined into the document so the first paint already uses
+        # the saved theme/font instead of flashing a default and correcting
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        html = html.replace("__PREFS__", json.dumps(store.get_prefs(db)), 1)
+        return Response(html, media_type="text/html",
+                        headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/prefs")
+    def api_prefs_get():
+        return store.get_prefs(db)
+
+    @app.post("/api/prefs")
+    async def api_prefs_set(request: Request):
+        body = await _json_body(request)
+        key, value = body.get("key"), body.get("value")
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise HTTPException(400, "key and value must be strings")
+        store.set_pref(db, key, value)
+        return {"ok": True}
 
     @app.get("/theme.css")
     def theme():

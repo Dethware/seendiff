@@ -5,6 +5,13 @@
 <title>seendiff</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>
+  // UI prefs live server-side (see store.get_prefs): every run gets a fresh
+  // port and localStorage is origin-scoped, so it alone forgets. The server
+  // inlines its copy here; localStorage stays the read cache.
+  (function () {
+    var prefs = __PREFS__;
+    for (var k in prefs) localStorage.setItem(k, prefs[k]);
+  })();
   // apply persisted theme before first paint to avoid a flash of wrong theme
   (function () {
     var t = localStorage.getItem("seendiff.theme");
@@ -385,6 +392,14 @@ button:hover { border-color: var(--accent); }
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
+// write-through: localStorage for this origin, server DB for every future run
+function savePref(k, v) {
+  localStorage.setItem(k, v);
+  fetch("/api/prefs", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({key: k, value: String(v)}),
+  }).catch(() => {});
+}
 const pane = $("pane"), spacer = $("spacer"), mm = $("minimap");
 const LH = parseFloat(getComputedStyle(document.documentElement)
                       .getPropertyValue("--line-height"));
@@ -500,7 +515,7 @@ function fileGlyph(f) {
 }
 let collapsed = new Set(JSON.parse(localStorage.getItem("seendiff.collapsed") || "[]"));
 function saveCollapsed() {
-  localStorage.setItem("seendiff.collapsed", JSON.stringify([...collapsed]));
+  savePref("seendiff.collapsed", JSON.stringify([...collapsed]));
 }
 function makeBar(rev, seen, total) {
   const bar = document.createElement("span"); bar.className = "f-bar";
@@ -1230,7 +1245,7 @@ addEventListener("mouseup", () => {
     resizing = false;
     rz.classList.remove("active");
     document.body.style.cursor = "";
-    localStorage.setItem("seendiff.sbw", sb.getBoundingClientRect().width | 0);
+    savePref("seendiff.sbw", sb.getBoundingClientRect().width | 0);
     if (file) { computeOffsets(); renderRows(); drawMinimap(); }  // pane width changed
   });
 }
@@ -1238,13 +1253,13 @@ addEventListener("mouseup", () => {
 /* ---------- theme & font ---------- */
 function setTheme(t) {
   document.documentElement.dataset.theme = t;
-  localStorage.setItem("seendiff.theme", t);
+  savePref("seendiff.theme", t);
   $("btn-theme").textContent = t;
   drawMinimap();
 }
 function setFont(f) {
   document.documentElement.style.setProperty("--mono-font", `'${f}'`);
-  localStorage.setItem("seendiff.font", f);
+  savePref("seendiff.font", f);
   $("btn-font").textContent = f === "JetBrains Mono" ? "JB Mono" : "Ubuntu Mono";
   document.fonts.ready.then(() => {
     if (file) { measureMetrics(); computeOffsets(); renderRows(); drawMinimap(); }
@@ -1259,7 +1274,7 @@ $("btn-font").onclick = () => {
 /* ---------- layout mode ---------- */
 function setSplit(on) {
   split = on;
-  localStorage.setItem("seendiff.split", on ? "1" : "0");
+  savePref("seendiff.split", on ? "1" : "0");
   $("btn-split").textContent = on ? "split" : "unified";
   if (!file) return;
   // anchor on the line at the top of the pane so the toggle doesn't lose place
@@ -1308,7 +1323,7 @@ $("btn-keys").onclick = () => toggleHelp();
 $("help-overlay").onclick = e => { if (e.target === $("help-overlay")) toggleHelp(false); };
 $("btn-hide").onclick = () => {
   hideDone = !hideDone;
-  localStorage.setItem("seendiff.hide", hideDone ? "1" : "0");
+  savePref("seendiff.hide", hideDone ? "1" : "0");
   $("btn-hide").style.opacity = hideDone ? 1 : .55;
   renderSidebar();
 };
@@ -1498,7 +1513,7 @@ function renderWtOutline() {
 function wtSaveProgress() {
   if (!wt || wtStep < 0) return;
   // keyed by digest: a rewritten walkthrough gets a clean slate on purpose
-  localStorage.setItem("seendiff.wt." + wt.digest, JSON.stringify(
+  savePref("seendiff.wt." + wt.digest, JSON.stringify(
     { stepId: wt.steps[wtStep].id, visited: [...wtVisited] }));
 }
 function wtRestoreProgress() {
@@ -1577,7 +1592,7 @@ function updateHash() {
     if (!resizing) return;
     resizing = false; rz.classList.remove("active");
     document.body.style.cursor = "";
-    localStorage.setItem("seendiff.wth",
+    savePref("seendiff.wth",
       $("wt-bar").getBoundingClientRect().height | 0);
     if (file) { computeOffsets(); renderRows(); drawMinimap(); }
   });

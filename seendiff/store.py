@@ -18,6 +18,10 @@ CREATE TABLE IF NOT EXISTS block_state (
   PRIMARY KEY (scope, path, hunk_id)
 );
 CREATE INDEX IF NOT EXISTS bs_scope ON block_state(scope);
+CREATE TABLE IF NOT EXISTS prefs (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 """
 
 
@@ -101,6 +105,20 @@ def unmark_reviewed(db: sqlite3.Connection, scope: str,
                 "UPDATE block_state SET reviewed_at=NULL "
                 "WHERE scope=? AND path=? AND hunk_id=?",
                 [(scope, p, h) for p, h in blocks])
+
+
+def get_prefs(db: sqlite3.Connection) -> dict[str, str]:
+    """UI prefs live in the DB, not localStorage: each run picks a fresh port,
+    and localStorage is keyed by origin, so port-local storage forgets."""
+    return {k: v for k, v in db.execute("SELECT key, value FROM prefs")}
+
+
+def set_pref(db: sqlite3.Connection, key: str, value: str) -> None:
+    with db:
+        db.execute(
+            "INSERT INTO prefs (key, value) VALUES (?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value))
 
 
 def clear_scope(db: sqlite3.Connection, scope: str) -> None:
