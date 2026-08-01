@@ -192,6 +192,74 @@ button:hover { border-color: var(--accent); }
 #empty-msg { padding: 48px; color: var(--fg-dim); font-size: 14px;
   font-family: system-ui, sans-serif; }
 
+/* ---- walkthrough (CODEWALKTHROUGH.md §3) ---- */
+#wt-bar { flex: none; height: var(--wt-height, 160px); background: var(--bg2);
+  border-top: 1px solid var(--border); display: flex; flex-direction: column;
+  position: relative; font-family: system-ui, sans-serif; }
+#wt-bar[hidden] { display: none; }
+#wt-resizer { position: absolute; top: -3px; left: 0; right: 0; height: 6px;
+  cursor: row-resize; z-index: 5; }
+#wt-resizer:hover, #wt-resizer.active { background: var(--accent); opacity: .5; }
+#wt-head { display: flex; align-items: baseline; gap: 10px; padding: 8px 14px 2px;
+  flex: none; min-width: 0; }
+#wt-act { color: var(--accent); font-size: 11px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+#wt-count { color: var(--fg-dim); font-size: 11px; white-space: nowrap;
+  font-family: var(--mono-font), monospace; }
+#wt-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+#wt-tag { font-size: 10px; color: var(--fg-dim); border: 1px solid var(--border);
+  border-radius: 3px; padding: 0 4px; display: none; }
+#wt-bar.d1 #wt-tag { display: inline; }
+#wt-bar.d1 #wt-head, #wt-bar.d1 #wt-text, #wt-bar.d1 #wt-refs { padding-left: 28px; }
+#wt-sp { flex: 1; }
+#wt-hint { color: var(--fg-dim); font-size: 11px; white-space: nowrap; }
+#wt-text { flex: 1; overflow-y: auto; padding: 4px 14px; font-size: 13px;
+  line-height: 1.5; min-height: 0; }
+#wt-text.err { color: var(--del-sign); white-space: pre-wrap;
+  font-family: var(--mono-font), monospace; font-size: 12px; }
+#wt-refs { flex: none; display: flex; gap: 6px; padding: 4px 14px;
+  flex-wrap: wrap; align-items: center; }
+.wt-chip { font-family: var(--mono-font), monospace; font-size: 11px;
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 7px;
+  cursor: pointer; color: var(--fg); background: var(--bg); }
+.wt-chip:hover { border-color: var(--accent); }
+.wt-chip.primary { border-color: var(--accent); color: var(--accent); }
+.wt-fwd { font-size: 11px; color: var(--fg-dim); cursor: pointer;
+  margin-left: auto; white-space: nowrap; }
+.wt-fwd:hover { color: var(--accent); }
+#wt-pips { flex: none; display: flex; align-items: center; gap: 4px;
+  padding: 6px 14px 8px; overflow-x: auto; }
+.wt-pip { width: 8px; height: 8px; border-radius: 50%; flex: none; cursor: pointer;
+  border: 1px solid var(--fg-dim); background: transparent; opacity: .45; }
+.wt-pip.visited { opacity: 1; }
+.wt-pip.cur { background: var(--accent); border-color: var(--accent); opacity: 1; }
+.wt-pip.d1 { width: 5px; height: 5px; }
+.wt-gap { width: 8px; flex: none; }
+/* a step up in weight from .selected: "this is the subject", not "selected" */
+.row.wt-hi { background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent); }
+.row.split.wt-hi .half { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.row.wt-anchor .ln.new { position: relative; }
+.row.wt-anchor .ln.new::before { content: ""; position: absolute; right: 1px;
+  top: 50%; margin-top: -3px; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); opacity: .5; }
+#wt-outline { border-bottom: 1px solid var(--border); max-height: 40%;
+  overflow-y: auto; flex: none; font-size: 12px; padding-bottom: 4px; }
+#wt-o-head { padding: 7px 12px 3px; font-weight: 600; cursor: pointer; }
+#wt-o-head .d-arrow { display: inline-block; }
+.wt-o-act { padding: 5px 12px 2px; color: var(--fg-dim); font-size: 10.5px;
+  font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  cursor: pointer; }
+.wt-o-step { padding: 2px 12px 2px 22px; cursor: pointer; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; border-left: 2px solid transparent; }
+.wt-o-step:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.wt-o-step.cur { border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.wt-o-step.d1 { padding-left: 32px; color: var(--fg-dim); }
+.wt-files-head { padding: 8px 12px 2px; color: var(--fg-dim); font-size: 10.5px;
+  font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+
 /* ---- minimap ---- */
 #minimap { flex: none; width: 14px; cursor: pointer; background: var(--bg2);
   border-left: 1px solid var(--border); }
@@ -237,6 +305,7 @@ button:hover { border-color: var(--accent); }
     <div id="sb-base"></div>
     <div id="dirty-banner"></div>
   </div>
+  <div id="wt-outline" hidden></div>
   <input id="filter" placeholder="filter files  (g)" spellcheck="false">
   <div id="filelist"></div>
   <div id="sb-resizer" title="drag to resize"></div>
@@ -255,6 +324,18 @@ button:hover { border-color: var(--accent); }
   <div id="pane-wrap">
     <div id="pane"><div id="spacer"></div></div>
     <canvas id="minimap"></canvas>
+  </div>
+  <div id="wt-bar" hidden>
+    <div id="wt-resizer" title="drag to resize"></div>
+    <div id="wt-head">
+      <span id="wt-act"></span><span id="wt-count"></span>
+      <span id="wt-title"></span><span id="wt-tag">detail</span>
+      <span id="wt-sp"></span>
+      <span id="wt-hint">← → step · [ ] act · . detail · w exit</span>
+    </div>
+    <div id="wt-text"></div>
+    <div id="wt-refs"></div>
+    <div id="wt-pips"></div>
   </div>
 </main>
 <div id="help-overlay">
@@ -277,6 +358,15 @@ button:hover { border-color: var(--accent); }
       <tr><td>t</td><td>cycle theme</td></tr>
       <tr><td>X</td><td>reset all seen / reviewed state (asks first)</td></tr>
       <tr><td>?</td><td>this help &nbsp;·&nbsp; Esc closes</td></tr>
+      <tbody id="help-wt" hidden>
+      <tr><td colspan="2" style="padding-top:10px;font-weight:600">Walkthrough</td></tr>
+      <tr><td>w</td><td>enter / exit walkthrough mode</td></tr>
+      <tr><td>← / →</td><td>prev / next step (in walkthrough mode)</td></tr>
+      <tr><td>[ / ]</td><td>prev / next act</td></tr>
+      <tr><td>1–9</td><td>jump to act <i>n</i></td></tr>
+      <tr><td>.</td><td>show / hide detail (depth-1) steps</td></tr>
+      <tr><td>⇧← / ⇧→</td><td>prev / next change block (escape hatch)</td></tr>
+      </tbody>
     </table>
     <div id="help-hint">click a line number to copy a ref · shift-click / drag for a range</div>
   </div>
@@ -309,6 +399,14 @@ let curPath = null;
 let focusIdx = -1;        // focused block index
 let hideDone = localStorage.getItem("seendiff.hide") === "1";
 let selAnchor = null, selEnd = null;   // gutter selection, view row indices
+
+/* ---------- walkthrough state (CODEWALKTHROUGH.md §3) ---------- */
+let wt = null;              // /api/walkthrough payload, or null
+let wtStep = -1, wtOn = false, wtDetail = true, wtVisited = new Set();
+let wtHi = null;            // {r0, r1} view-row range of the current step's ref
+let wtAnchors = new Set();  // view rows carrying anchor dots (current step only)
+let wtAway = false;         // jumped to an also/anchor: → returns to the primary ref
+let wtActsClosed = new Set();  // collapsed acts in the sidebar outline
 
 /* ---------- view space ----------
    file.lines[] is the diff's line list; the viewer draws *view rows*. Unified:
@@ -519,6 +617,28 @@ function renderSidebar() {
   } else {
     renderTree(list, buildTree(meta.files), "", 0);
   }
+  // files that exist only in the walkthrough: distinct glyph, clearly not diff
+  if (wt && wt.wt_paths && wt.wt_paths.length) {
+    const shown = wt.wt_paths.filter(p => !q || p.toLowerCase().includes(q));
+    if (shown.length) {
+      const head = document.createElement("div");
+      head.className = "wt-files-head"; head.textContent = "walkthrough";
+      list.append(head);
+      for (const p of shown) {
+        const item = document.createElement("div");
+        item.className = "f-item" + (p === curPath ? " cur" : "");
+        const glyph = document.createElement("span");
+        glyph.className = "f-glyph"; glyph.textContent = "◈";
+        const name = document.createElement("span");
+        name.className = "f-name";
+        const bdi = document.createElement("bdi");
+        bdi.textContent = p; name.append(bdi); name.title = p;
+        item.append(glyph, name);
+        item.onclick = () => openFile(p);
+        list.append(item);
+      }
+    }
+  }
   const s = meta.stats;
   $("sb-stats").textContent =
     `${s.reviewed}/${s.blocks} reviewed · ${s.seen + s.reviewed} seen · ${meta.files.length} files`;
@@ -578,13 +698,14 @@ async function openFile(path, focusLine) {
     + (file.status !== "modified" ? ` · ${file.status}` : "");
   measureMetrics();
   computeOffsets();
+  wtRecompute();
   pane.scrollTop = focusLine
     ? Math.max(0, offsets[viewOf[Math.min(focusLine - 1, file.lines.length - 1)]]
                   - pane.clientHeight / 3)
     : 0;
   renderSidebar();
   renderRows(); drawMinimap();
-  history.replaceState(null, "", "#f=" + encodeURIComponent(path));
+  updateHash();
 }
 
 /* ---------- view rows ----------
@@ -755,6 +876,8 @@ function renderRows() {
     el.classList.toggle("focused-block",
       !!focusB && i >= focusB.r0 && i <= focusB.r1);
     el.classList.toggle("selected", i >= s0 && i <= s1);
+    el.classList.toggle("wt-hi", !!wtHi && i >= wtHi.r0 && i <= wtHi.r1);
+    el.classList.toggle("wt-anchor", wtAnchors.has(i));
     const bi = blockByRow[i];
     const chk = el.querySelector(".chk");
     if (chk && chk.dataset.active && bi >= 0) {
@@ -860,6 +983,25 @@ function drawMinimap() {
       ctx.globalAlpha = 1;
     }
   }
+  if (wtHi || wtAnchors.size) {
+    const accent = getComputedStyle(document.documentElement)
+                   .getPropertyValue("--accent").trim();
+    if (wtHi) {                            // accent bracket at the current ref
+      const y = offsets[wtHi.r0] / T * h;
+      const bh = Math.max(4, (offsets[wtHi.r1 + 1] - offsets[wtHi.r0]) / T * h);
+      ctx.strokeStyle = accent; ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(4, y + 1); ctx.lineTo(1, y + 1);
+      ctx.lineTo(1, y + bh - 1); ctx.lineTo(4, y + bh - 1);
+      ctx.stroke();
+    }
+    ctx.fillStyle = accent;
+    for (const v of wtAnchors) {           // thin tick per anchor
+      ctx.globalAlpha = .6;
+      ctx.fillRect(w - 5, offsets[v] / T * h, 4, 2);
+      ctx.globalAlpha = 1;
+    }
+  }
   const y0 = pane.scrollTop / T * h;
   const y1 = (pane.scrollTop + pane.clientHeight) / T * h;
   ctx.fillStyle = getComputedStyle(document.documentElement)
@@ -955,7 +1097,7 @@ function flushSeen(beacon) {
                          headers: { "content-type": "application/json" } });
   }
 }
-setInterval(() => { evalSeen(); flushSeen(false); }, 2000);
+setInterval(() => { evalSeen(); flushSeen(false); wtPoll(); }, 2000);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") flushSeen(true);
 });
@@ -1045,6 +1187,12 @@ pane.addEventListener("mousedown", e => {
   if (!ln) return;
   e.preventDefault();
   const row = +ln.dataset.row;
+  // anchor dot: jump like the chip — step unchanged, → returns to primary
+  if (wtOn && !e.shiftKey && wtAnchors.has(row)) {
+    const ar = wt.steps[wtStep].also.find(a =>
+      a.path === curPath && wtAnchors.has(row) && viewOf[wtLineRange(a)[0]] === row);
+    if (ar) { wtJumpRef(ar); return; }
+  }
   if (e.shiftKey && selAnchor !== null) selEnd = row;
   else { selAnchor = row; selEnd = row; }
   dragging = true;
@@ -1122,6 +1270,7 @@ function setSplit(on) {
   dwell.clear();
   buildView();
   computeBlockRanges();
+  wtRecompute();               // wtHi/anchors live in view space
   measureMetrics();
   computeOffsets();
   clearRows();
@@ -1164,6 +1313,276 @@ $("btn-hide").onclick = () => {
   renderSidebar();
 };
 
+/* ---------- walkthrough (CODEWALKTHROUGH.md §3) ---------- */
+async function loadWalkthrough() {
+  try {
+    const r = await fetch("/api/walkthrough");
+    wt = r.ok ? await r.json() : null;
+  } catch (e) { wt = null; }
+  $("help-wt").hidden = !wt;
+}
+function wtStepIdx(id) { return wt ? wt.steps.findIndex(s => s.id === id) : -1; }
+function wtSeq() {          // step indices in play: all, or the depth-0 spine
+  return wt.steps.map((s, i) => i).filter(i => wtDetail || wt.steps[i].depth === 0);
+}
+function wtBase(p) { return p.split("/").pop(); }
+function wtRefLabel(r) {
+  return wtBase(r.path) + ":" + (r.lines[0] === r.lines[1]
+    ? r.lines[0] : r.lines[0] + "-" + r.lines[1]);
+}
+/* resolve a ref to [i0, i1] line indices in the *open* file. Line refs are
+   new-side numbers: find the line whose .new matches, *then* map through
+   viewOf[] — viewOf is indexed by position in file.lines, not by new-side
+   number. hunk_id refs resolve through the block ranges instead. */
+function wtLineRange(ref) {
+  if (ref.hunk_id) {
+    const b = blocks.find(x => x.hunk_id === ref.hunk_id);
+    if (b) return [b.l0, b.l1];
+  }
+  let i0 = file.lines.findIndex(l => l.new === ref.lines[0]);
+  let i1 = file.lines.findIndex(l => l.new === ref.lines[1]);
+  if (i0 < 0) i0 = i1 < 0 ? 0 : i1;
+  if (i1 < 0) i1 = i0;
+  return [Math.min(i0, i1), Math.max(i0, i1)];
+}
+function wtRecompute() {    // wtHi + wtAnchors for the open file, from wtStep
+  wtHi = null; wtAnchors = new Set();
+  if (!wtOn || !wt || wtStep < 0 || !file) return;
+  const step = wt.steps[wtStep];
+  if (step.ref.path === curPath) {
+    const [i0, i1] = wtLineRange(step.ref);
+    wtHi = { r0: Math.min(viewOf[i0], viewOf[i1]),
+             r1: Math.max(viewOf[i0], viewOf[i1]) };
+  }
+  for (const ar of step.also) {         // cross-file refs stay chips until
+    if (ar.path !== curPath) continue;  // that file is opened
+    wtAnchors.add(viewOf[wtLineRange(ar)[0]]);
+  }
+}
+function wtScrollTo(r0, r1) {  // centre if it fits, else range top at ¼ height
+  const top = offsets[r0] ?? 0;
+  const bot = offsets[Math.min(r1 + 1, offsets.length - 1)] ?? top;
+  pane.scrollTop = bot - top <= pane.clientHeight
+    ? Math.max(0, (top + bot) / 2 - pane.clientHeight / 2)
+    : Math.max(0, top - pane.clientHeight / 4);
+}
+async function wtJumpRef(ref) {  // secondary jump: step unchanged, wtAway set
+  if (ref.path !== curPath) await openFile(ref.path);
+  const [i0, i1] = wtLineRange(ref);
+  wtScrollTo(viewOf[i0], viewOf[i1]);
+  wtAway = true;
+  renderRows(); drawMinimap();
+}
+async function gotoStep(i) {
+  if (!wt || i < 0 || i >= wt.steps.length) return;
+  wtStep = i; wtAway = false;
+  const step = wt.steps[i];
+  if (step.ref.path !== curPath) await openFile(step.ref.path);
+  wtRecompute();
+  if (wtHi) {
+    wtScrollTo(wtHi.r0, wtHi.r1);
+    // focus the block under the ref so R / V / y act on the code the bar is
+    // talking about; no block (unchanged code, walkthrough-only file) -> -1
+    focusIdx = blockByRow[wtHi.r0] ?? -1;
+  }
+  wtVisited.add(step.id);
+  renderRows(); drawMinimap(); renderWtBar(); renderWtOutline();
+  wtSaveProgress(); updateHash();
+}
+function wtMove(dir) {
+  if (!wt) return;
+  if (dir > 0 && wtAway) { gotoStep(wtStep); return; }  // back to primary ref
+  const seq = wtSeq();
+  const next = dir > 0 ? seq.find(i => i > wtStep)
+                       : seq.slice().reverse().find(i => i < wtStep);
+  if (next !== undefined) gotoStep(next);
+  else toast(dir > 0 ? "end of walkthrough" : "start of walkthrough");
+}
+function wtActIdx() {
+  const s = wt.steps[wtStep];
+  return s ? wt.acts.findIndex(a => a.id === s.act) : -1;
+}
+function wtGotoAct(ai) {
+  if (!wt || ai < 0 || ai >= wt.acts.length) return;
+  const i = wt.steps.findIndex(s => s.act === wt.acts[ai].id);
+  if (i >= 0) gotoStep(i);
+}
+function renderWtBar() {
+  if (!wt || wtStep < 0) return;
+  const step = wt.steps[wtStep];
+  const act = wt.acts.find(a => a.id === step.act);
+  $("wt-act").textContent = act ? act.title : step.act;
+  $("wt-act").title = wt.title + (wt.intro ? " — " + wt.intro : "");
+  $("wt-count").textContent = (wtStep + 1) + "/" + wt.steps.length;
+  $("wt-title").textContent = step.title;
+  $("wt-bar").classList.toggle("d1", step.depth === 1);
+  const txt = $("wt-text");
+  // a reload that failed validation: show the error in place of the prose,
+  // keep playing the previous good script
+  txt.classList.toggle("err", !!wt.error);
+  txt.textContent = wt.error ? "walkthrough reload failed:\n" + wt.error : step.text;
+  txt.scrollTop = 0;
+
+  const refs = $("wt-refs");
+  refs.textContent = "";
+  const chip = (label, cls, title, fn) => {
+    const c = document.createElement("span");
+    c.className = "wt-chip " + cls; c.textContent = label; c.title = title;
+    c.onclick = fn; refs.append(c);
+  };
+  chip(wtRefLabel(step.ref), "primary", step.ref.path, () => gotoStep(wtStep));
+  for (const ar of step.also)
+    chip("+ " + wtRefLabel(ar), "", ar.path + (ar.note ? " — " + ar.note : ""),
+         () => wtJumpRef(ar));
+  if (step.forward) {
+    const tgt = wt.steps[wtStepIdx(step.forward)];
+    const f = document.createElement("span");
+    f.className = "wt-fwd";
+    f.textContent = "→ later: " + (tgt ? tgt.title : step.forward);
+    f.onclick = () => gotoStep(wtStepIdx(step.forward));
+    refs.append(f);
+  }
+
+  const pips = $("wt-pips");
+  pips.textContent = "";
+  let lastAct = null;
+  wt.steps.forEach((s, i) => {
+    if (lastAct !== null && s.act !== lastAct) {
+      const g = document.createElement("span"); g.className = "wt-gap";
+      pips.append(g);
+    }
+    lastAct = s.act;
+    const p = document.createElement("span");
+    p.className = "wt-pip" + (s.depth ? " d1" : "")
+      + (i === wtStep ? " cur" : "") + (wtVisited.has(s.id) ? " visited" : "");
+    p.title = s.title;
+    p.onclick = () => gotoStep(i);
+    pips.append(p);
+  });
+}
+function renderWtOutline() {
+  const o = $("wt-outline");
+  if (!wt) { o.hidden = true; return; }
+  o.hidden = false;
+  o.textContent = "";
+  const head = document.createElement("div");
+  head.id = "wt-o-head";
+  const arrow = document.createElement("span");
+  arrow.className = "d-arrow";
+  arrow.textContent = renderWtOutline.closed ? "▸ " : "▾ ";
+  head.append(arrow, wt.title);
+  head.onclick = () => { renderWtOutline.closed = !renderWtOutline.closed; renderWtOutline(); };
+  o.append(head);
+  if (renderWtOutline.closed) return;
+  for (const a of wt.acts) {
+    const ah = document.createElement("div");
+    ah.className = "wt-o-act";
+    ah.textContent = (wtActsClosed.has(a.id) ? "▸ " : "▾ ") + a.title;
+    ah.onclick = () => {
+      wtActsClosed.has(a.id) ? wtActsClosed.delete(a.id) : wtActsClosed.add(a.id);
+      renderWtOutline();
+    };
+    o.append(ah);
+    if (wtActsClosed.has(a.id)) continue;
+    wt.steps.forEach((s, i) => {
+      if (s.act !== a.id) return;
+      const el = document.createElement("div");
+      el.className = "wt-o-step" + (s.depth ? " d1" : "") + (i === wtStep ? " cur" : "");
+      el.textContent = s.title;
+      el.title = s.title;
+      el.onclick = () => { if (!wtOn) setWalkthrough(true); gotoStep(i); };
+      o.append(el);
+    });
+  }
+}
+function wtSaveProgress() {
+  if (!wt || wtStep < 0) return;
+  // keyed by digest: a rewritten walkthrough gets a clean slate on purpose
+  localStorage.setItem("seendiff.wt." + wt.digest, JSON.stringify(
+    { stepId: wt.steps[wtStep].id, visited: [...wtVisited] }));
+}
+function wtRestoreProgress() {
+  try {
+    const p = JSON.parse(localStorage.getItem("seendiff.wt." + wt.digest) || "null");
+    if (p) { wtVisited = new Set(p.visited || []); return wtStepIdx(p.stepId); }
+  } catch (e) {}
+  return -1;
+}
+function setWalkthrough(on) {
+  if (!wt) return;
+  wtOn = on;
+  $("wt-bar").hidden = !on;
+  // the bar changes pane.clientHeight: same trio setSplit runs
+  if (on) {
+    if (file) computeOffsets();
+    gotoStep(wtStep >= 0 ? wtStep : Math.max(0, wtRestoreProgress()));
+  } else {
+    wtHi = null; wtAnchors = new Set(); wtAway = false;
+    if (file) { computeOffsets(); renderRows(); drawMinimap(); }
+    updateHash();
+  }
+  renderWtOutline();
+}
+/* live reload: rides the 2 s interval that already exists for seen-flushing */
+let wtPollBusy = false;
+async function wtPoll() {
+  if (!wt || wtPollBusy) return;
+  wtPollBusy = true;
+  try {
+    const r = await fetch("/api/walkthrough");
+    if (!r.ok) return;
+    const nw = await r.json();
+    if (nw.digest !== wt.digest) {
+      const curId = wtStep >= 0 ? wt.steps[wtStep].id : null;
+      wt = nw;
+      wtVisited = new Set();
+      const keep = curId ? wtStepIdx(curId) : -1;
+      wtStep = Math.max(0, keep);
+      toast("walkthrough reloaded");
+      renderSidebar();
+      if (wtOn) gotoStep(wtStep); else renderWtOutline();
+    } else if ((nw.error || null) !== (wt.error || null)) {
+      wt.error = nw.error || null;
+      if (wtOn) renderWtBar();
+    }
+  } catch (e) {} finally { wtPollBusy = false; }
+}
+function updateHash() {
+  if (!curPath || !file) return;
+  let h = "#f=" + encodeURIComponent(curPath)
+        + "&l=" + (firstLineOf(findRow(pane.scrollTop)) + 1);
+  if (wtOn && wt && wtStep >= 0)
+    h += "&w=" + encodeURIComponent(wt.steps[wtStep].id);
+  history.replaceState(null, "", h);
+}
+/* bar resize: same pattern as the sidebar resizer */
+{
+  const rz = $("wt-resizer");
+  const saved = parseInt(localStorage.getItem("seendiff.wth") || "160", 10);
+  document.documentElement.style.setProperty("--wt-height", saved + "px");
+  let resizing = false, startY = 0, startH = 0;
+  rz.addEventListener("mousedown", e => {
+    e.preventDefault();
+    resizing = true; rz.classList.add("active");
+    startY = e.clientY; startH = $("wt-bar").getBoundingClientRect().height;
+    document.body.style.cursor = "row-resize";
+  });
+  addEventListener("mousemove", e => {
+    if (!resizing) return;
+    const h = Math.max(80, Math.min(innerHeight * .6, startH + startY - e.clientY));
+    document.documentElement.style.setProperty("--wt-height", h + "px");
+    renderRows(); drawMinimap();
+  });
+  addEventListener("mouseup", () => {
+    if (!resizing) return;
+    resizing = false; rz.classList.remove("active");
+    document.body.style.cursor = "";
+    localStorage.setItem("seendiff.wth",
+      $("wt-bar").getBoundingClientRect().height | 0);
+    if (file) { computeOffsets(); renderRows(); drawMinimap(); }
+  });
+}
+
 /* ---------- keymap (PLAN.md §12) ---------- */
 addEventListener("keydown", e => {
   if (e.target === $("filter")) {
@@ -1189,15 +1608,24 @@ addEventListener("keydown", e => {
   if (k === "?") { stop(); toggleHelp(); return; }
   if ($("help-overlay").classList.contains("show")) return;
   if (k === "X") { stop(); askResetAll(); return; }
-  if (k === "ArrowLeft") { stop(); nextBlock(-1); }
-  else if (k === "ArrowRight") { stop(); nextBlock(1); }
+  // walkthrough mode rebinds ← / →; Shift+arrows keep block nav as the
+  // escape hatch. Everything else works unchanged while a walkthrough plays.
+  if (k === "ArrowLeft") { stop(); wtOn && !e.shiftKey ? wtMove(-1) : nextBlock(-1); }
+  else if (k === "ArrowRight") { stop(); wtOn && !e.shiftKey ? wtMove(1) : nextBlock(1); }
   else if (k === "ArrowUp") { stop(); nextFile(-1); }
   else if (k === "ArrowDown") { stop(); nextFile(1); }
+  else if (k === "w") { stop(); if (wt) setWalkthrough(!wtOn); }
+  else if (wtOn && k === "[") { stop(); wtGotoAct(wtActIdx() - 1); }
+  else if (wtOn && k === "]") { stop(); wtGotoAct(wtActIdx() + 1); }
+  else if (wtOn && k === ".") { stop(); wtDetail = !wtDetail;
+      toast(wtDetail ? "detail steps on" : "detail steps off"); }
+  else if (wtOn && k >= "1" && k <= "9") { stop(); wtGotoAct(+k - 1); }
   else if (k === "R") { stop(); if (focusIdx >= 0) {
       const wasRev = blocks[focusIdx].reviewed;
       toggleReviewed(focusIdx);
-      if (!wasRev) nextUnreviewed(1);
-    } }
+      // in walkthrough mode R stays put: the advance belongs to →
+      if (!wasRev && !wtOn) nextUnreviewed(1);
+    } else if (wtOn) toast("no change block here"); }
   else if (k === "n") { stop(); nextUnreviewed(1); }
   else if (k === "N") { stop(); nextUnreviewed(-1); }
   else if (k === "j") pane.scrollTop += LH * 3;
@@ -1225,9 +1653,9 @@ pane.addEventListener("scroll", () => {
   requestAnimationFrame(() => {
     rafPending = false;
     renderRows(); drawMinimap(); evalSeen();
-    // the hash carries a line index, not a view index, so it survives a toggle
-    if (curPath && file) history.replaceState(null, "",
-      "#f=" + encodeURIComponent(curPath) + "&l=" + (firstLineOf(findRow(pane.scrollTop)) + 1));
+    // the hash carries a line index, not a view index, so it survives a
+    // toggle; updateHash also carries the walkthrough step through
+    updateHash();
   });
 });
 addEventListener("resize", () => {
@@ -1247,7 +1675,8 @@ $("filter").addEventListener("input", renderSidebar);
   setFont(localStorage.getItem("seendiff.font") || FONTS[0]);
   setSplit(split);
   await loadMeta();
-  if (!meta.files.length) {
+  await loadWalkthrough();
+  if (!meta.files.length && !wt) {   // with a walkthrough, an empty diff is fine
     $("tb-path").textContent = "nothing to review";
     const d = document.createElement("div");
     d.id = "empty-msg";
@@ -1256,12 +1685,22 @@ $("filter").addEventListener("input", renderSidebar);
     pane.append(d);
     return;
   }
+  if (wt) { renderSidebar(); renderWtOutline(); }
   const h = new URLSearchParams(location.hash.slice(1));
   const start = h.get("f");
-  if (start && meta.files.some(f => f.path === start)) {
+  const known = p => meta.files.some(f => f.path === p)
+    || (wt && wt.wt_paths.includes(p));
+  if (start && known(start)) {
     await openFile(start, +(h.get("l") || 0) || undefined);
-  } else {
+  } else if (meta.files.length) {
     await openFile(meta.files[0].path);
+  }
+  if (wt) {
+    const wparam = h.get("w");
+    const i = wparam ? wtStepIdx(wparam) : -1;
+    if (i >= 0) { wtStep = i; wtVisited = new Set(); wtRestoreProgress(); }
+    setWalkthrough(true);            // on by default when --walkthrough is passed
+    toast(wt.title);
   }
 })();
 </script>
