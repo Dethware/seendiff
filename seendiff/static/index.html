@@ -58,6 +58,30 @@
   --sel-bg: rgba(154,164,174,.20); --focus-ring: #9aa4ae;
   --toast-bg: #d8d8dc; --toast-fg: #111113;
 }
+:root[data-theme="hailmary"] {
+  --bg: #0f0f11; --bg2: #1a1a1c; --fg: #c6c0b4; --fg-dim: #7e786d;
+  --border: #2e2c2b; --accent: #4e8f94;
+  --add-bg: rgba(143,156,94,.10); --del-bg: rgba(184,94,58,.10);
+  --add-sign: #8f9c5e; --del-sign: #b85e3a; --mixed: #c19a51;
+  --sel-bg: rgba(78,143,148,.22); --focus-ring: #4e8f94;
+  --toast-bg: #d2ccc0; --toast-fg: #0f0f11;
+}
+/* hailmary syntax grading: coffee is close but leaves attributes the same tan as
+   plain text and keywords flat grey — both matter in markup-heavy files. These
+   land after /theme.css, same specificity, so they win. */
+:root[data-theme="hailmary"] .hl .na { color: #c19a51; }  /* attribute */
+:root[data-theme="hailmary"] .hl .k,
+:root[data-theme="hailmary"] .hl .kc,
+:root[data-theme="hailmary"] .hl .kd,
+:root[data-theme="hailmary"] .hl .kn,
+:root[data-theme="hailmary"] .hl .kr,
+:root[data-theme="hailmary"] .hl .kt { color: #b85e3a; }  /* keyword */
+:root[data-theme="hailmary"] .hl .nf,
+:root[data-theme="hailmary"] .hl .nd { color: #d9a892; }  /* function/decorator */
+:root[data-theme="hailmary"] .hl .c,
+:root[data-theme="hailmary"] .hl .c1,
+:root[data-theme="hailmary"] .hl .cm,
+:root[data-theme="hailmary"] .hl .cs { color: #6f6a60; }  /* comment */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -147,8 +171,10 @@ button:hover { border-color: var(--accent); }
 .row.add .sign { color: var(--add-sign); }
 .row.del .sign { color: var(--del-sign); }
 .chk { flex: none; width: 1.4em; text-align: center; cursor: pointer;
-  user-select: none; color: var(--fg-dim); }
-.chk.reviewed { color: var(--add-sign); }
+  user-select: none; color: var(--fg-dim); font-size: 14px; }
+/* seen/reviewed mirror the minimap: seen = faded green, reviewed = full green */
+.chk.seen { color: color-mix(in srgb, var(--add-sign) 60%, var(--fg-dim)); }
+.chk.reviewed { color: var(--add-sign); font-weight: 700; }
 .chk:hover { color: var(--accent); }
 .content { flex: 1; min-width: 0; font-family: inherit; font-size: inherit;
   white-space: pre-wrap; word-break: break-all; tab-size: 4; }
@@ -272,7 +298,7 @@ const $ = id => document.getElementById(id);
 const pane = $("pane"), spacer = $("spacer"), mm = $("minimap");
 const LH = parseFloat(getComputedStyle(document.documentElement)
                       .getPropertyValue("--line-height"));
-const THEMES = ["light", "dark", "solarized", "space"];
+const THEMES = ["light", "dark", "solarized", "space", "hailmary"];
 const FONTS = ["JetBrains Mono", "Ubuntu Sans Mono"];
 
 let meta = null;          // /api/files payload
@@ -733,6 +759,7 @@ function renderRows() {
     const chk = el.querySelector(".chk");
     if (chk && chk.dataset.active && bi >= 0) {
       chk.classList.toggle("reviewed", !!blocks[bi].reviewed);
+      chk.classList.toggle("seen", !!blocks[bi].seen && !blocks[bi].reviewed);
       chk.textContent = blocks[bi].reviewed ? "☑" : "☐";
     }
   }
