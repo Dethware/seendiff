@@ -310,6 +310,36 @@ def expand_submodules(repo: str, files: list[FileDiff]) -> list[FileDiff]:
     return out
 
 
+# ---------------------------------------------------------- worktree files
+
+WORKTREE_MAX_BYTES = 5_000_000
+
+
+def worktree_rows(repo: str, path: str) -> list[Row]:
+    """A working-tree file as all-context rows: old == new == i + 1, no hunks.
+
+    Serves walkthrough refs into files that aren't in the diff. Guards mirror
+    highlight.guard in spirit: binary and oversized content are hard errors —
+    the walkthrough validator already rejected such refs, so hitting one here
+    means the file changed underneath us.
+    """
+    import os
+    full = os.path.join(repo, path)
+    try:
+        with open(full, "rb") as f:
+            raw = f.read(WORKTREE_MAX_BYTES + 1)
+    except OSError as e:
+        raise GitError(f"cannot read {path}: {e}")
+    if len(raw) > WORKTREE_MAX_BYTES:
+        raise GitError(f"{path} too large ({len(raw) // 1024} kB)")
+    if b"\0" in raw[:8192]:
+        raise GitError(f"{path} is binary")
+    lines = raw.decode("utf-8", "replace").split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return [Row(i + 1, i + 1, "context", line) for i, line in enumerate(lines)]
+
+
 # -------------------------------------------------------------- display pass
 
 def _rows_from_patched_file(pf) -> list[Row]:

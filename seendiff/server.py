@@ -17,6 +17,7 @@ from pygments.formatters import HtmlFormatter
 from . import git as G
 from . import highlight as H
 from . import store
+from . import walkthrough as W
 
 STATIC = Path(__file__).parent / "static"
 
@@ -73,6 +74,47 @@ class AppState:
     lock: Lock = field(default_factory=Lock)
     file_cache: dict[str, dict] = field(default_factory=dict)
 
+    # walkthrough mode (CODEWALKTHROUGH.md §2)
+    wt_file: str | None = None                 # path of the JSON, if any
+    wt: W.Walkthrough | None = None            # last good copy
+    wt_error: str | None = None                # why the latest reload failed
+    wt_attempt_mtime: float = -1.0             # last mtime we tried to load
+    wt_paths: set[str] = field(default_factory=set)   # wt files not in the diff
+    wt_cache: dict[tuple[str, float], dict] = field(default_factory=dict)
+
+    def hunk_ids(self) -> dict[str, set[str]]:
+        return {p: {b.hunk_id for b in fd.blocks}
+                for p, fd in self.by_path.items()}
+
+    def _recompute_wt_paths(self) -> None:
+        self.wt_paths = (self.wt.paths() - set(self.by_path)
+                         if self.wt else set())
+
+    def load_walkthrough(self) -> None:
+        """(Re)load when the file's mtime moved; keep the last good copy.
+
+        A reload that fails validation leaves self.wt intact and records the
+        error — the bar shows it in place of the prose, never a blank bar
+        because the agent wrote a half-flushed file.
+        """
+        if not self.wt_file:
+            return
+        try:
+            mtime = os.stat(self.wt_file).st_mtime
+        except OSError as e:
+            self.wt_error = f"cannot stat walkthrough: {e}"
+            return
+        if mtime == self.wt_attempt_mtime:
+            return
+        self.wt_attempt_mtime = mtime
+        try:
+            self.wt = W.load(self.wt_file, self.repo, self.hunk_ids())
+            self.wt_error = None
+            self.wt_cache.clear()
+            self._recompute_wt_paths()
+        except W.WalkthroughError as e:
+            self.wt_error = "\n".join(e.problems)
+
     def refresh(self) -> None:
         with self.lock:
             self.mb_sha = G.merge_base(self.repo, self.base_ref)
@@ -86,6 +128,7 @@ class AppState:
             self.by_path = {f.path: f for f in self.files}
             self.dirty, self.conflicted = G.dirty_and_conflicted(self.repo)
             self.file_cache.clear()
+            self._recompute_wt_paths()
 
     def maybe_refresh(self) -> None:
         # diff is immutable per (mb, head); recompute only when HEAD moved
@@ -247,10 +290,66 @@ def create_app(st: AppState) -> FastAPI:
             "files": files,
         }
 
+    def _worktree_payload(path: str) -> dict:
+        """A walkthrough-only file as an all-context payload, same shape as a
+        diff payload so the client needs no branch. In-memory cache keyed by
+        (path, mtime): the diff cache's mb-head key only invalidates when HEAD
+        moves, which would serve stale content for a file edited in place."""
+        try:
+            mtime = os.stat(os.path.join(st.repo, path)).st_mtime
+        except OSError as e:
+            raise HTTPException(404, f"cannot stat {path}: {e}")
+        key = (path, mtime)
+        if key in st.wt_cache:
+            return st.wt_cache[key]
+        try:
+            rows = G.worktree_rows(st.repo, path)
+        except G.GitError as e:
+            raise HTTPException(404, str(e))
+        toks = None if st.no_highlight else H.highlight_rows(rows, path)
+        skip_reason = None if st.no_highlight else H.guard(rows)
+        lines = []
+        for i, r in enumerate(rows):
+            line = {"old": r.old, "new": r.new, "type": r.type}
+            if toks is not None:
+                line["t"] = toks[i]
+            else:
+                line["text"] = r.text
+            lines.append(line)
+        payload = {
+            "path": path, "old_path": None, "status": "worktree",
+            "lang": (H.lang_for(path) or "text") if toks is not None else "text",
+            "total_lines": len(rows),
+            "highlighted": toks is not None,
+            "skip_reason": skip_reason,
+            "blocks": [],
+            "lines": lines,
+        }
+        for k in [k for k in st.wt_cache if k[0] == path]:
+            del st.wt_cache[k]       # drop stale versions of this file only
+        st.wt_cache[key] = payload
+        return payload
+
+    @app.get("/api/walkthrough")
+    def api_walkthrough():
+        if not st.wt_file:
+            raise HTTPException(404, "no walkthrough loaded")
+        st.maybe_refresh()
+        st.load_walkthrough()
+        if st.wt is None:
+            raise HTTPException(
+                422, "walkthrough failed to load:\n" + (st.wt_error or "?"))
+        out = st.wt.to_json()
+        out["error"] = st.wt_error
+        out["wt_paths"] = sorted(st.wt_paths)
+        return out
+
     @app.get("/api/file")
     def api_file(path: str):
         fd = st.by_path.get(path)
         if fd is None:
+            if path in st.wt_paths:
+                return _worktree_payload(path)
             raise HTTPException(404, f"not in diff: {path}")
         payload = dict(_build_file_payload(st, fd))
         states = _file_states(st, db)

@@ -11,6 +11,7 @@ import uvicorn
 
 from . import git as G
 from . import store
+from . import walkthrough as W
 from .server import AppState, create_app
 
 
@@ -34,20 +35,49 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-highlight", action="store_true")
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--walkthrough", metavar="PATH", default=None,
+                    help="open a walkthrough JSON in walkthrough mode")
+    ap.add_argument("--check-walkthrough", metavar="PATH", default=None,
+                    help="validate a walkthrough JSON, print diagnostics, exit 0/1")
     args = ap.parse_args(argv)
 
     try:
         repo = G.repo_root(".")
         if args.fetch:
             G.fetch(repo)
-        base_ref = G.resolve_base(repo, args.base)
     except G.GitError as e:
         print(f"seendiff: {e}", file=sys.stderr)
         return 1
 
+    try:
+        base_ref = G.resolve_base(repo, args.base)
+    except G.GitError as e:
+        # a walkthrough of existing code doesn't need a base ref at all:
+        # warn and run with an empty diff (HEAD vs HEAD)
+        if not (args.walkthrough or args.check_walkthrough):
+            print(f"seendiff: {e}", file=sys.stderr)
+            return 1
+        print(f"seendiff: {e} — walkthrough mode, using an empty diff",
+              file=sys.stderr)
+        base_ref = "HEAD"
+
+    if args.check_walkthrough:
+        hunk_ids = {fd.path: {b.hunk_id for b in fd.blocks}
+                    for fd in G.expand_submodules(
+                        repo, G.identity_diff(repo, G.merge_base(repo, base_ref)))}
+        problems = W.check(args.check_walkthrough, repo, hunk_ids)
+        for p in problems:
+            print(p, file=sys.stderr)
+        if problems:
+            return 1
+        wt = W.load(args.check_walkthrough, repo, hunk_ids)
+        print(f"ok: {wt.title!r} — {len(wt.acts)} acts, {len(wt.steps)} steps")
+        return 0
+
     st = AppState(repo=repo, base_ref=base_ref,
                   no_highlight=args.no_highlight,
-                  auto_seen=not args.no_auto_seen)
+                  auto_seen=not args.no_auto_seen,
+                  wt_file=args.walkthrough)
 
     if args.clear:
         db = store.open_db()
@@ -57,7 +87,14 @@ def main(argv: list[str] | None = None) -> int:
         db.close()
         print(f"cleared review state for {scope}")
 
-    app = create_app(st)
+    app = create_app(st)          # runs the initial refresh
+    if args.walkthrough:
+        st.load_walkthrough()     # fail loudly at load, not in the browser
+        if st.wt is None:
+            print("seendiff: walkthrough failed to load:", file=sys.stderr)
+            for p in (st.wt_error or "?").splitlines():
+                print(f"  {p}", file=sys.stderr)
+            return 1
     port = args.port or free_port()
     url = f"http://127.0.0.1:{port}/"
     print(f"seendiff: {st.branch or 'detached'} vs {base_ref} "
