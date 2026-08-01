@@ -63,6 +63,29 @@ It picks a free port, starts a localhost server, and opens your browser. Ctrl-C 
 
 Useful flags: `--port`, `--no-browser`, `--no-highlight`, `--no-auto-seen`.
 
+### Walkthroughs
+
+seendiff can play back a *scripted code walkthrough* — an ordered, layered
+explanation written as JSON (usually by an agent; see
+[`CODEWALKTHROUGH.md`](CODEWALKTHROUGH.md) and the
+[worked example](examples/seendiff-review-state.json)):
+
+```bash
+seendiff --walkthrough .git/seendiff-walkthrough.json   # play it back
+seendiff --check-walkthrough path/to/wt.json            # validate, exit 0/1
+```
+
+A bar under the code pane carries the current step's prose; `←`/`→` step
+through the script, `[`/`]` jump acts, `.` toggles detail steps, `w` exits
+walkthrough mode. Works with or without a diff — any file in the repo is
+openable while a walkthrough is loaded.
+
+To let Claude write walkthroughs for any repo, symlink the skill once:
+
+```bash
+ln -s "$(pwd)/skills/code-walkthrough" ~/.claude/skills/code-walkthrough
+```
+
 ### Keys
 
 | | |

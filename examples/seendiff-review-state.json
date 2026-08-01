@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "title": "How review state survives a rebase",
+  "intro": "seendiff promises that what you marked reviewed stays reviewed after a rebase rewrites every line number. This walkthrough follows that promise: the table that stores the marks, the content hash that keys them, who writes them, and the edges where the scheme bends.",
+  "subject": { "kind": "code", "repo_head": "dc2e41c" },
+  "acts": [
+    { "id": "claim", "title": "The promise" },
+    { "id": "data", "title": "The state is three columns and a scope string" },
+    { "id": "identity", "title": "A block is a content hash, not a position" },
+    { "id": "write", "title": "Seen is passive, reviewed is deliberate" },
+    { "id": "edges", "title": "What bends it" }
+  ],
+  "steps": [
+    {
+      "id": "the-claim",
+      "act": "claim",
+      "depth": 0,
+      "title": "Review state must outlive the diff that created it",
+      "text": "A reviewer marks blocks over hours; the branch gets rebased in between. If review state were keyed by line numbers or by git's hunk headers, one rebase would wipe an afternoon of work. Everything in this walkthrough exists to prevent that. The whole persistence layer is this one small module — no ORM, no migrations.",
+      "ref": { "path": "seendiff/store.py", "lines": [1, 9] }
+    },
+    {
+      "id": "one-table",
+      "act": "data",
+      "depth": 0,
+      "title": "One row per (scope, path, hunk_id)",
+      "text": "Everything seendiff remembers is this table. The primary key is the whole story: scope isolates one review effort, path names the file, and hunk_id names the block — by content, not by position, which is the trick the identity act explains. Two nullable timestamps carry the two state levels; there is deliberately no 'unseen' row.",
+      "ref": { "path": "seendiff/store.py", "lines": [11, 21] },
+      "forward": "collisions"
+    },
+    {
+      "id": "scope-string",
+      "act": "data",
+      "depth": 0,
+      "title": "The scope string is symbolic on purpose",
+      "text": "Scope is repo|base_ref|branch — names, not SHAs. A rebase moves every commit and the merge base, but the branch is still called the same thing, so the scope string — and every row under it — carries over untouched. The merge-base SHA is only the fallback for a detached HEAD, where there is no stable name to use.",
+      "ref": { "path": "seendiff/store.py", "lines": [32, 34] },
+      "also": [
+        { "path": "seendiff/server.py", "lines": [124, 125],
+          "note": "where the scope string is built on refresh" }
+      ]
+    },
+    {
+      "id": "content-hash",
+      "act": "identity",
+      "depth": 0,
+      "title": "hunk_id = sha256 of the changed lines",
+      "text": "A block's identity is a hash of its +/- lines and nothing else — no filename, no line numbers, no context. Rebase the branch and the diff is recomputed from scratch, but a block whose content didn't change hashes to the same id, so its old row in the table still matches. Position-independence is the entire design.",
+      "ref": { "path": "seendiff/git.py", "lines": [220, 226] },
+      "also": [
+        { "path": "seendiff/git.py", "lines": [151, 152],
+          "note": "body(): the exact bytes that get hashed" }
+      ],
+      "forward": "collisions"
+    },
+    {
+      "id": "blocks-not-hunks",
+      "act": "identity",
+      "depth": 1,
+      "title": "Blocks are seendiff's own grouping, not git's",
+      "text": "Git's -U0 hunks are merged when fewer than four unchanged lines separate them. Without this, adding one line inside an existing change would split a reviewed block into differently-hashed pieces. The merge gap makes block identity robust against the small edits a review round actually produces.",
+      "ref": { "path": "seendiff/git.py", "lines": [210, 217] }
+    },
+    {
+      "id": "u0-pass",
+      "act": "identity",
+      "depth": 1,
+      "title": "Identity comes from a single -U0 pass at startup",
+      "text": "One zero-context diff over the whole change computes every block and its hash up front. The full-context rows the viewer displays come from a separate per-file pass later; identity never depends on how much context is rendered, so display choices can't perturb the hashes.",
+      "ref": { "path": "seendiff/git.py", "lines": [232, 247] }
+    },
+    {
+      "id": "seen-passive",
+      "act": "write",
+      "depth": 0,
+      "title": "Seen happens to you: dwell and scroll-past",
+      "text": "A block becomes seen when it sat fully visible for half a second, or when you scrolled past it. No keystroke. The point is honesty — 'seen' claims only that the pixels crossed your screen while the window had focus. That's why unfocused windows and background tabs accumulate nothing.",
+      "ref": { "path": "seendiff/static/index.html", "lines": [1072, 1084] },
+      "also": [
+        { "path": "seendiff/static/index.html", "lines": [1085, 1088],
+          "note": "markSeen: queue for batching, update locally" }
+      ]
+    },
+    {
+      "id": "reviewed-deliberate",
+      "act": "write",
+      "depth": 0,
+      "title": "Reviewed is an upsert that never loses seen",
+      "text": "Marking reviewed writes both timestamps in one statement. The COALESCE keeps the original seen_at if one exists — the record of when you first saw a block is never overwritten by re-reviewing it. Un-reviewing demotes to seen rather than deleting, for the same reason: history is kept, not rewound.",
+      "ref": { "path": "seendiff/store.py", "lines": [74, 83] }
+    },
+    {
+      "id": "server-validates",
+      "act": "write",
+      "depth": 1,
+      "title": "The server drops writes for blocks it can't see",
+      "text": "Every incoming mark is checked against the current diff; unknown paths and unknown hunk_ids are silently dropped. A stale client — one still showing the pre-rebase diff — can't plant rows that reference blocks which no longer exist.",
+      "ref": { "path": "seendiff/server.py", "lines": [364, 370] }
+    },
+    {
+      "id": "collisions",
+      "act": "edges",
+      "depth": 0,
+      "title": "Hunk-id collisions get an ordinal suffix",
+      "text": "Two identical changes in one file — the same line added in two places — hash identically. The second occurrence becomes hash-2, keyed by encounter order. That makes identity positional again for exact duplicates only: delete the first copy and the second inherits its id, along with its review mark. A known, accepted bend in the scheme.",
+      "ref": { "path": "seendiff/git.py", "lines": [220, 226] }
+    },
+    {
+      "id": "whole-file",
+      "act": "edges",
+      "depth": 1,
+      "title": "Binary, meta and rename changes get the '*' id",
+      "text": "Files with no reviewable lines still need exactly one reviewable thing, so they get a synthetic whole-file block with id '*'. Its 'content' is the file's status, so a pure rename that later gains real edits stops being '*' and re-keys — which is correct: there is now something new to review.",
+      "ref": { "path": "seendiff/git.py", "lines": [257, 261] }
+    },
+    {
+      "id": "pruning",
+      "act": "edges",
+      "depth": 1,
+      "title": "Rows die after 60 days, not on branch delete",
+      "text": "Nothing ever deletes state when a branch disappears — seendiff can't know a branch is gone for good. Instead every open prunes rows untouched for 60 days. Cheap, safe, and it means resurrecting a branch within two months resurrects its review state too.",
+      "ref": { "path": "seendiff/store.py", "lines": [48, 54] }
+    },
+    {
+      "id": "the-payoff",
+      "act": "edges",
+      "depth": 0,
+      "title": "The rebase itself is a non-event",
+      "text": "When HEAD moves, the server just recomputes the diff; nothing touches the database. The new blocks hash to the same ids where content survived, the symbolic scope string still matches, and the table's rows light up against the fresh diff exactly as before. The promise from step one is kept by never storing anything a rebase can change.",
+      "ref": { "path": "seendiff/server.py", "lines": [133, 138] }
+    }
+  ]
+}
