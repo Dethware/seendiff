@@ -2,6 +2,8 @@
 
 A local, point-in-time diff reviewer for a stack of commits.
 
+![MIT](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue) ![No build step](https://img.shields.io/badge/build%20step-none-green)
+
 Renders your branch's full diff against `origin/master`, shows each changed file **whole**
 (not as hunk fragments with three lines of context), remembers which changes you've
 looked at and which you've explicitly signed off, and makes it easy to copy precise line
@@ -80,6 +82,20 @@ capital makes it case-sensitive. `.*` toggles regex. Removed lines are
 searchable too. Reopening with `Ctrl-F` keeps the last query, its results and
 the panel; a new query resets them (and brings a dismissed panel back).
 
+### Themes
+
+`t` cycles six themes — **light**, **dark**, **solarized-light**, **solarized-dark**,
+**space** and **hailmary**. Each carries a matching Pygments palette, so syntax colours
+change with the chrome rather than staying bolted to one scheme.
+
+The sidebar progress bar is a neon meter: an analog tick row on space and hailmary, a
+solid bar elsewhere, and its glow stays off until you're half done, then ramps up as the
+review finishes. The light themes run flat, with no glow at all.
+
+Theme, font, layout, sidebar width and collapsed folders persist **server-side**, not in
+`localStorage` — every run gets a fresh port, and browser storage is scoped per origin,
+so it alone would forget.
+
 ### Walkthroughs
 
 seendiff can play back a *scripted code walkthrough* — an ordered, layered
@@ -134,24 +150,34 @@ ln -s "$(pwd)/skills/code-diff" ~/.claude/skills/code-diff
 
 ## Architecture
 
-Roughly 2,000 lines total, six Python modules and one HTML file. No build step, no
-frontend framework, no bundler, no node_modules.
+**A Python HTTP server, one hand-written HTML file, and SQLite.** That's the whole stack:
+
+- **Server** — FastAPI on uvicorn, bound to `127.0.0.1`. Serves a handful of JSON
+  endpoints and one page.
+- **Frontend** — vanilla JavaScript and CSS in a single `index.html`. No framework, no
+  bundler, no build step, no `node_modules`.
+- **State** — SQLite. One file, two tables, no ORM and no migrations.
+
+**~4,000 lines of shipped code**, plus ~460 of tests. Four runtime dependencies:
+FastAPI, uvicorn, `unidiff`, Pygments.
 
 ```
-git ──► git.py ──► server.py ──► static/index.html
-                       │            (fetches JSON, renders)
-                       ▼
-                    store.py ──► ~/.local/state/seendiff/state.db
+git ──► git.py ──────► server.py ──► static/index.html
+                        │   ▲          (fetches JSON, renders)
+        walkthrough.py ─┘   │
+                            ▼
+                        store.py ──► ~/.local/state/seendiff/state.db
 ```
 
 | file | lines | what it does |
 |---|---|---|
-| `git.py` | 416 | Runs `git diff` via subprocess, parses it with `unidiff`, groups hunks into **blocks**, expands submodule pointers, and reconstructs each file's *whole* post-image with every line tagged added / removed / context. |
-| `server.py` | 313 | FastAPI app: a handful of JSON endpoints plus the static page. Holds the diff in memory and recomputes only when HEAD moves. |
-| `store.py` | 108 | SQLite. One table, no ORM, no migrations. |
+| `static/index.html` | 2326 | The entire UI: markup, CSS and vanilla JS in one file. Virtual scroller, side-by-side and unified views, canvas minimap, search, six themes, walkthrough player. |
+| `server.py` | 526 | FastAPI app. Holds the diff in memory, recomputes only when HEAD moves, disk-caches rendered files, and inlines the syntax palette into the page. |
+| `git.py` | 446 | Runs `git diff` via subprocess, parses it with `unidiff`, groups hunks into **blocks**, expands submodule pointers, and reconstructs each file's *whole* post-image with every line tagged added / removed / context. |
+| `walkthrough.py` | 348 | Loads and validates walkthrough scripts; every line reference is checked against the real diff before anything renders. |
+| `store.py` | 126 | SQLite: review state and UI preferences. |
+| `cli.py` | 117 | argparse → pick a free port → open a browser → `uvicorn.run`. |
 | `highlight.py` | 109 | Pygments tokenization per line, with bail-outs for minified or enormous files. |
-| `cli.py` | 72 | argparse → pick a free port → open a browser → `uvicorn.run`. |
-| `static/index.html` | 1069 | The entire UI: markup, CSS, and vanilla JS in one file. |
 
 A few decisions worth knowing:
 
@@ -174,6 +200,9 @@ line up.
 **Server binds 127.0.0.1 and rejects any `Host` header that isn't localhost**, so a
 malicious page in another tab can't reach into your source tree via DNS rebinding.
 
+**Nothing leaves the machine.** No telemetry, no network calls, no accounts. `git fetch`
+runs only when you pass `--fetch`.
+
 State lives in `~/.local/state/seendiff/state.db` and is pruned after 60 days;
 the rendered-file cache in `~/.cache/seendiff/` after 30.
 
@@ -183,9 +212,23 @@ the rendered-file cache in `~/.cache/seendiff/` after 30.
 rejected, and the reasoning behind each locked decision. Deviations made during
 implementation are noted inline.
 
-## Fonts
+## Development
 
-Bundles [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) (Apache-2.0) and
+```bash
+.venv/bin/pip install -e . pytest
+.venv/bin/python -m pytest tests/ -q
+```
+
+35 tests: the walkthrough validator, the search endpoint, preference storage, and the
+search-match renderer — that last one runs under `node` (skipped if you don't have it)
+and pulls the functions straight out of `index.html`, so it can't drift from what ships.
+
+## License
+
+[MIT](LICENSE).
+
+Bundles two fonts under their own terms:
+[JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) (Apache-2.0) and
 [Ubuntu Sans Mono](https://github.com/canonical/Ubuntu-Sans-fonts) (UFL-1.0).
 
 ## Options

@@ -2,7 +2,16 @@
 name = "seendiff"
 version = "0.1.0"
 description = "Local point-in-time diff reviewer with persistent review state"
+readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Version Control :: Git",
+]
 dependencies = [
     "fastapi>=0.100",
     "uvicorn>=0.23",
