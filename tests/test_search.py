@@ -1,12 +1,12 @@
 """/api/search: whole-change content search (see README §search)."""
 from __future__ import annotations
 
-import os
 import subprocess
 
 import pytest
 from fastapi.testclient import TestClient
 
+from seendiff import server
 from seendiff.server import AppState, create_app, line_text
 
 
@@ -39,6 +39,29 @@ def client(tmp_path, monkeypatch):
                   db_path=str(tmp_path / "state.db"))
     with TestClient(create_app(st), headers={"host": "localhost"}) as c:
         yield c
+
+
+def test_every_theme_has_syntax_rules(client):
+    """A theme with no matching selectors renders as plain text.
+
+    Renaming a theme rewrites every selector in the generated palette, so this
+    guards the pairing between THEME_STYLES and the data-theme values the
+    viewer actually sets.
+    """
+    html = client.get("/").text
+    for theme in server.THEME_STYLES:
+        assert f'[data-theme="{theme}"] .hl .k' in html, f"{theme}: no keyword rule"
+        assert f'data-theme="{theme}"' in html, f"{theme}: no palette in index.html"
+
+
+def test_theme_palette_is_inlined_not_linked(client):
+    """Linked, it was cached for a day and could outlive a theme rename."""
+    r = client.get("/")
+    assert 'href="/theme.css"' not in r.text, "linked again; it can go stale"
+    assert "no-store" in r.headers["cache-control"]
+    # the palette must still land before the app's own rules, which override
+    # some of it at equal specificity
+    assert r.text.index(".hl .k ") < r.text.index("#sb-progress {")
 
 
 def hits(payload):

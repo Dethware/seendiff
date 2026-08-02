@@ -25,7 +25,8 @@ STATIC = Path(__file__).parent / "static"
 THEME_STYLES = {
     "light": "default",
     "dark": "github-dark",
-    "solarized": "solarized-dark",
+    "solarized-dark": "solarized-dark",
+    "solarized-light": "solarized-light",
     "space": "nord",
     "hailmary": "coffee",
 }
@@ -275,6 +276,13 @@ def create_app(st: AppState) -> FastAPI:
         # the saved theme/font instead of flashing a default and correcting
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         html = html.replace("__PREFS__", json.dumps(store.get_prefs(db)), 1)
+        # The syntax palette is inlined, not linked. As a separate file it was
+        # cached for a day, so renaming a theme (which rewrites every selector
+        # in it) left browsers on a stale sheet that matched nothing and the
+        # theme silently lost its colours. This document is no-store, so the
+        # palette can never be older than the page it styles. ~36 KB, gzipped.
+        html = html.replace('<link rel="stylesheet" href="/theme.css">',
+                            f"<style>{theme_css}</style>", 1)
         return Response(html, media_type="text/html",
                         headers={"Cache-Control": "no-store"})
 

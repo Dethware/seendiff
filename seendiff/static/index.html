@@ -15,6 +15,8 @@
   // apply persisted theme before first paint to avoid a flash of wrong theme
   (function () {
     var t = localStorage.getItem("seendiff.theme");
+    // "solarized" split into a dark and a light variant; keep old prefs working
+    if (t === "solarized") t = "solarized-dark";
     if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     document.documentElement.dataset.theme = t;
     var f = localStorage.getItem("seendiff.font") || "JetBrains Mono";
@@ -57,13 +59,27 @@
   --sel-bg: rgba(56,139,253,.25); --focus-ring: #58a6ff;
   --toast-bg: #c9d1d9; --toast-fg: #0d1117;
 }
-:root[data-theme="solarized"] {
+:root[data-theme="solarized-dark"] {
   --bg: #002b36; --bg2: #073642; --fg: #93a1a1; --fg-dim: #657b83;
   --border: #0a4552; --accent: #268bd2;
   --add-bg: rgba(133,153,0,.10); --del-bg: rgba(220,50,47,.10);
   --add-sign: #859900; --del-sign: #dc322f; --mixed: #b58900;
   --sel-bg: rgba(38,139,210,.25); --focus-ring: #268bd2;
   --toast-bg: #eee8d5; --toast-fg: #002b36;
+  /* base03 is already the dark end of this palette — the default 58% black
+     lands almost pure black and reads as a hole rather than a recess */
+  --trough: color-mix(in srgb, #000 18%, var(--bg));
+}
+/* the same accents on Solarized's light base — base3/base2 paper, base00 ink */
+:root[data-theme="solarized-light"] {
+  --bg: #fdf6e3; --bg2: #eee8d5; --fg: #586e75; --fg-dim: #93a1a1;
+  --border: #ded8c4; --accent: #268bd2;
+  --add-bg: rgba(133,153,0,.14); --del-bg: rgba(220,50,47,.12);
+  --add-sign: #859900; --del-sign: #dc322f; --mixed: #b58900;
+  --sel-bg: rgba(38,139,210,.18); --focus-ring: #268bd2;
+  --toast-bg: #073642; --toast-fg: #eee8d5;
+  --neon: var(--add-sign);                      /* no white-mix on paper */
+  --trough: color-mix(in srgb, #000 12%, var(--bg));
 }
 :root[data-theme="space"] {
   --bg: #111113; --bg2: #1a1a1d; --fg: #b8bbc2; --fg-dim: #77797f;
@@ -86,7 +102,7 @@
 }
 /* hailmary syntax grading: coffee is close but leaves attributes the same tan as
    plain text and keywords flat grey — both matter in markup-heavy files. These
-   land after /theme.css, same specificity, so they win. */
+   land after the inlined pygments palette, same specificity, so they win. */
 :root[data-theme="hailmary"] .hl .na { color: #c19a51; }  /* attribute */
 :root[data-theme="hailmary"] .hl .k,
 :root[data-theme="hailmary"] .hl .kc,
@@ -102,6 +118,19 @@
 :root[data-theme="hailmary"] .hl .cs { color: #6f6a60; }  /* comment */
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
+/* Scrollbars in the theme's own colours. scrollbar-color is the standard and
+   what Firefox honours; the ::-webkit- rules give Chrome a thinner thumb with
+   a hover state, which the standard property can't express. */
+* { scrollbar-color: var(--sb-thumb) transparent; scrollbar-width: thin; }
+:root { --sb-thumb: color-mix(in srgb, var(--fg) 26%, transparent); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--sb-thumb); border-radius: 5px;
+  border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--accent) 65%, var(--fg));
+  background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
 html, body { height: 100%; }
 body {
   background: var(--bg); color: var(--fg);
@@ -180,19 +209,20 @@ button:hover { border-color: var(--accent); }
                       color-mix(in srgb, var(--neon) 45%, transparent))
           drop-shadow(0 0 calc(9px * var(--glow, 0))
                       color-mix(in srgb, var(--neon) 30%, transparent)); }
-/* Ticks are the space/hailmary signature. The other three run a solid bar:
-   swapping --notches for a flat gradient turns the track and both lit layers
-   solid in one move, geometry and snapping untouched. */
+/* Ticks are the space/hailmary signature. The rest run a solid bar: swapping
+   --notches for a flat gradient turns the track and both lit layers solid in
+   one move, geometry and snapping untouched. */
 :is(:root[data-theme="light"], :root[data-theme="dark"],
-    :root[data-theme="solarized"]) :is(#sb-progress, #sb-progress span) {
+    :root[data-theme="solarized-dark"], :root[data-theme="solarized-light"])
+:is(#sb-progress, #sb-progress span) {
   --notches: linear-gradient(var(--notch), var(--notch)); }
-:root[data-theme="light"] #sb-progress span,
-:root[data-theme="dark"] #sb-progress span,
-:root[data-theme="solarized"] #sb-progress span { border-radius: 2px; }
-/* the glow is the point in the dark themes; on white it only muddies, so
-   light mode gets a flat bar and leans on the trough for contrast */
-:root[data-theme="light"] #sb-progress .rev { filter: none; }
-:root[data-theme="light"] .f-bar .rev { filter: none; }
+:is(:root[data-theme="light"], :root[data-theme="dark"],
+    :root[data-theme="solarized-dark"], :root[data-theme="solarized-light"])
+#sb-progress span { border-radius: 2px; }
+/* the glow is the point on a dark base; over paper it only muddies, so the
+   two light themes go flat and lean on the trough for contrast */
+:is(:root[data-theme="light"], :root[data-theme="solarized-light"])
+:is(#sb-progress, .f-bar) .rev { filter: none; }
 /* space and hailmary keep the ticks and run roughly twice the bloom */
 :root[data-theme="space"] #sb-progress .rev {
   filter: drop-shadow(0 0 3px color-mix(in srgb, var(--neon) 70%, transparent))
@@ -260,7 +290,11 @@ button:hover { border-color: var(--accent); }
 #topbar button { font-size: 12px; }
 
 #pane-wrap { flex: 1; display: flex; min-height: 0; position: relative; }
-#pane { flex: 1; overflow: auto; position: relative;
+/* min-width: 0 — a flex item defaults to min-width:auto and refuses to shrink
+   below its content, and the minimap is flex:none so it can't give way: the
+   pane wins the argument and the minimap gets pushed off the right edge, where
+   body's overflow:hidden clips it. */
+#pane { flex: 1; min-width: 0; overflow: auto; position: relative;
   font-family: var(--mono-font), monospace; font-size: var(--font-size); }
 #spacer { position: relative; min-width: 100%; }
 .row { position: absolute; left: 0; right: 0;
@@ -481,11 +515,10 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
     <button id="btn-keys" title="keyboard shortcuts (?)">keys?</button>
   </div>
   <div id="searchbar" hidden>
-    <input id="s-input" placeholder="search this file" spellcheck="false">
+    <input id="s-input" placeholder="search all changed files" spellcheck="false">
     <span id="s-count"></span>
     <button id="s-prev" title="previous match (⇧⏎)">↑</button>
     <button id="s-next" title="next match (⏎)">↓</button>
-    <button id="s-scope" title="search this file / all changed files (⇥)">this file</button>
     <button id="s-regex" title="regular expression">.*</button>
     <button id="s-panel-btn" title="show / hide the results panel">results</button>
     <button id="s-close" title="close search (Esc)">✕</button>
@@ -533,7 +566,7 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
       <tr><td>y</td><td>copy ref + content (selection or focused block)</td></tr>
       <tr><td>Y</td><td>copy refs for all unreviewed blocks in file</td></tr>
       <tr><td>s</td><td>toggle side-by-side / unified</td></tr>
-      <tr><td>Ctrl-F</td><td>search — ⏎ / ⇧⏎ next / prev · ⇥ this file / all files · Esc closes</td></tr>
+      <tr><td>Ctrl-F</td><td>search all changed files — ⏎ / ⇧⏎ next / prev · Esc closes</td></tr>
       <tr><td>g</td><td>focus file filter</td></tr>
       <tr><td>h</td><td>hide fully-reviewed files</td></tr>
       <tr><td>t</td><td>cycle theme</td></tr>
@@ -577,7 +610,8 @@ function savePref(k, v) {
 const pane = $("pane"), spacer = $("spacer"), mm = $("minimap");
 const LH = parseFloat(getComputedStyle(document.documentElement)
                       .getPropertyValue("--line-height"));
-const THEMES = ["light", "dark", "solarized", "space", "hailmary"];
+const THEMES = ["light", "dark", "solarized-light", "solarized-dark",
+                "space", "hailmary"];
 const FONTS = ["JetBrains Mono", "Ubuntu Sans Mono"];
 
 let meta = null;          // /api/files payload
@@ -1902,7 +1936,6 @@ function updateHash() {
 const SEARCH_MAX = 5000;         // in-file match cap, keeps the minimap honest
 const PANEL_MAX = 300;           // result rows rendered, the rest is a note
 let sOpen = false;               // the bar is showing
-let sScope = "file";             // "file" | "all"
 let sRegex = localStorage.getItem("seendiff.sregex") === "1";
 let sQuery = "";
 let sMatches = [];               // in-file hits: {i: line index, s, e}
@@ -1960,37 +1993,23 @@ function redrawSearch() {   // marks are baked into row DOM: rebuild the rows
 function renderSearchCount() {
   const c = $("s-count");
   if (!sQuery) { c.textContent = ""; return; }
-  if (sScope === "all") {
-    c.textContent = sGlobal
-      ? (sGlobal.total ? sGlobal.total + (sGlobal.truncated ? "+" : "")
-                         + " in " + sGlobal.files.length + " files"
-                       : "no matches")
-      : "…";
-    return;
-  }
-  c.textContent = sMatches.length
-    ? (sIdx + 1) + "/" + sMatches.length + (sMatches.length >= SEARCH_MAX ? "+" : "")
-    : "no matches";
+  if (!sGlobal) { c.textContent = "…"; return; }
+  if (!sGlobal.total) { c.textContent = "no matches"; return; }
+  const tot = sGlobal.total + (sGlobal.truncated ? "+" : "");
+  const k = resultIdx();
+  c.textContent = k >= 0 ? (k + 1) + "/" + tot
+                         : tot + " in " + sGlobal.files.length + " files";
 }
 
 /* ---- results panel ---- */
 function resultRows() {   // [path, {line, new, old, type, text, start, end}]
   const out = [];
-  if (sScope === "all") {
-    if (sGlobal) for (const f of sGlobal.files)
-      for (const m of f.matches) out.push([f.path, m]);
-    return out;
-  }
-  if (!file) return out;
-  let last = -1;
-  for (const h of sMatches) {          // one row per line, like the server does
-    if (h.i === last) continue;
-    last = h.i;
-    const l = file.lines[h.i];
-    out.push([curPath, { line: h.i, new: l.new, old: l.old, type: l.type,
-                         text: rowText(l).slice(0, 400), start: h.s, end: h.e }]);
-  }
+  if (sGlobal) for (const f of sGlobal.files)
+    for (const m of f.matches) out.push([f.path, m]);
   return out;
+}
+function resultIdx() {    // position of the opened result in the flat list
+  return resultRows().findIndex(([p, m]) => p + "|" + m.line === sCur);
 }
 function snippet(el, text, s, e) {
   el.append(text.slice(0, s).replace(/^\s+/, ""));
@@ -2003,7 +2022,7 @@ function renderResults() {
   p.hidden = !(sOpen && sPanel);
   $("s-panel-btn").classList.toggle("on", sPanel);
   if (p.hidden) return;
-  $("sp-sub").textContent = sScope === "all" ? "all changed files" : "this file";
+  $("sp-sub").textContent = sGlobal ? sGlobal.files.length + " files" : "";
   const box = $("s-results");
   box.textContent = "";
   const note = msg => {
@@ -2011,10 +2030,10 @@ function renderResults() {
     d.id = "s-note"; d.textContent = msg; box.append(d);
   };
   if (!sQuery) { note("type to search"); return; }
-  if (sScope === "all" && !sGlobal) { note("searching…"); return; }
+  if (!sGlobal) { note("searching…"); return; }
   const all = resultRows();
   if (!all.length) {
-    note(sScope === "all" ? "no matches in the change" : "no matches in this file");
+    note("no matches in the change");
     return;
   }
   // the list is rebuilt on every ⏎: don't hand it thousands of rows
@@ -2044,7 +2063,7 @@ function renderResults() {
   }
   if (rows.length < all.length)
     note("showing " + rows.length + " of " + all.length + " lines");
-  else if (sScope === "all" && sGlobal.truncated)
+  else if (sGlobal.truncated)
     note("stopped at " + sGlobal.total + " matches — narrow the query");
   box.querySelector(".sr-hit.cur")?.scrollIntoView({ block: "nearest" });
 }
@@ -2070,7 +2089,7 @@ function scheduleGlobal() {
 }
 async function runGlobalSearch() {
   clearTimeout(sTimer);
-  if (sScope !== "all" || !sQuery) { renderResults(); return; }
+  if (!sQuery) { renderResults(); return; }
   const q = sQuery;
   try {
     const r = await fetch("/api/search?q=" + encodeURIComponent(q)
@@ -2111,14 +2130,6 @@ function closeSearch() {
   renderResults();                    // hides the panel, keeps sPanel wanted
   paneResized();
 }
-function setScope(scope) {
-  sScope = scope;
-  $("s-scope").textContent = scope === "all" ? "all files" : "this file";
-  $("s-input").placeholder =
-    scope === "all" ? "search all changed files" : "search this file";
-  if (scope === "all" && !sGlobal) runGlobalSearch();
-  else { renderResults(); renderSearchCount(); }
-}
 function queryChanged() {
   sQuery = $("s-input").value;
   sGlobal = null; sCur = null;
@@ -2126,14 +2137,11 @@ function queryChanged() {
   runFileSearch();
   if (sMatches.length) gotoMatch(nearestMatch(findRow(pane.scrollTop)));
   else redrawSearch();
-  if (sScope === "all") scheduleGlobal();
+  scheduleGlobal();
 }
 $("s-input").addEventListener("input", queryChanged);
-$("s-next").onclick = () =>
-  sScope === "all" ? stepResult(1) : gotoMatch(sIdx + 1);
-$("s-prev").onclick = () =>
-  sScope === "all" ? stepResult(-1) : gotoMatch(sIdx - 1);
-$("s-scope").onclick = () => setScope(sScope === "file" ? "all" : "file");
+$("s-next").onclick = () => stepResult(1);
+$("s-prev").onclick = () => stepResult(-1);
 $("s-regex").onclick = () => {
   sRegex = !sRegex;
   savePref("seendiff.sregex", sRegex ? "1" : "0");
@@ -2141,7 +2149,7 @@ $("s-regex").onclick = () => {
   sGlobal = null;
   runFileSearch();
   redrawSearch();
-  if (sScope === "all") scheduleGlobal();
+  scheduleGlobal();
 };
 $("s-panel-btn").onclick = () => {
   sPanel = !sPanel;
@@ -2185,9 +2193,7 @@ addEventListener("keydown", e => {
     else if (e.key === "Enter") {
       e.preventDefault();
       const dir = e.shiftKey ? -1 : 1;
-      if (sScope === "all") stepResult(dir); else gotoMatch(sIdx + dir);
-    } else if (e.key === "Tab") {
-      e.preventDefault(); setScope(sScope === "file" ? "all" : "file");
+      stepResult(dir);
     }
     return;
   }
@@ -2285,7 +2291,6 @@ $("filter").addEventListener("input", renderSidebar);
   setFont(localStorage.getItem("seendiff.font") || FONTS[0]);
   setSplit(split);
   $("s-regex").classList.toggle("on", sRegex);
-  setScope("file");
   layoutNotches();          // before the first renderSidebar paints the bar
   await loadMeta();
   await loadWalkthrough();

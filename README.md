@@ -65,9 +65,9 @@ Useful flags: `--port`, `--no-browser`, `--no-highlight`, `--no-auto-seen`.
 
 ### Search
 
-`Ctrl-F` opens the search bar. It searches **the open file** by default; `⇥`
-(or the scope button) switches to **all changed files**. Results land in a
-right-hand panel — click one to jump, `⏎` / `⇧⏎` walk them, `Esc` closes.
+`Ctrl-F` opens the search bar. It searches **every changed file**. Results land
+in a right-hand panel — click one to jump, `⏎` / `⇧⏎` walk them, `Esc` closes.
+Matches in the open file are marked in place as you type.
 
 The browser's own find can't help here: the code pane is virtualized, so only
 the rows on screen exist in the DOM. seendiff matches against the diff data
@@ -124,7 +124,7 @@ ln -s "$(pwd)/skills/code-diff" ~/.claude/skills/code-diff
 | `y` | copy a `path:line` ref for the focused block, with its content |
 | `Y` | copy refs for everything still unreviewed |
 | `j` `k` `d` `u` | scroll |
-| `Ctrl-F` | search — `⏎`/`⇧⏎` next / previous, `⇥` this file / all files |
+| `Ctrl-F` | search all changed files — `⏎`/`⇧⏎` next / previous |
 | `g` | focus the file filter |
 | `h` | hide fully-reviewed files |
 | `t` | cycle theme &nbsp;•&nbsp; `?` help &nbsp;•&nbsp; `X` reset all state |
