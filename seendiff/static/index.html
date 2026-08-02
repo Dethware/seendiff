@@ -145,7 +145,7 @@ button:hover { border-color: var(--accent); }
   /* both sizes come from layoutNotches(): ticks land on whole device pixels
      and the tick row is an exact number of ticks wide, padding excluded, so
      no tick is half-drawn at either end */
-  --notch-w: 3px; --notch-p: 5px;      /* fallbacks; JS snaps the real values */
+  --notch-w: 7px; --notch-p: 10px;     /* fallbacks; JS snaps the real values */
   position: relative; height: 15px; margin-top: 8px;
   width: var(--pbar-w, 100%); padding: 3px var(--pbar-pad, 3px);
   border-radius: 3px;
@@ -163,14 +163,23 @@ button:hover { border-color: var(--accent); }
   top: 3px; bottom: 3px;
   background-image: var(--notches); transition: width .3s; }
 #sb-progress .seen { --notch: color-mix(in srgb, var(--neon) 72%, transparent); }
-/* A tick row is only ~60% ink where a solid bar is 100%, so at equal colour it
+/* A tick row is only ~70% ink where a solid bar is 100%, so at equal colour it
    reads dimmer. The glow makes up the difference: it bleeds into the gaps and
    the lit run becomes a band with tick texture, not a row of dashes. */
+/* The first pass is constant and file-bar sized — that's all you get for the
+   first half. --glow (0..1, set by setMainBar from the reviewed fraction)
+   scales the rest in from the halfway mark, so the bar only catches fire as
+   the review actually finishes. At --glow 0 those radii are 0: a zero-blur
+   shadow sits exactly under the ticks and is invisible. */
 #sb-progress .rev { --notch: var(--neon); z-index: 1;    /* over .seen */
-  filter: drop-shadow(0 0 1px var(--neon))
-          drop-shadow(0 0 2px color-mix(in srgb, var(--neon) 70%, transparent))
-          drop-shadow(0 0 5px color-mix(in srgb, var(--neon) 45%, transparent))
-          drop-shadow(0 0 9px color-mix(in srgb, var(--neon) 30%, transparent)); }
+  transition: width .3s, filter .4s;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--neon) 70%, transparent))
+          drop-shadow(0 0 calc(2px * var(--glow, 0))
+                      color-mix(in srgb, var(--neon) 70%, transparent))
+          drop-shadow(0 0 calc(5px * var(--glow, 0))
+                      color-mix(in srgb, var(--neon) 45%, transparent))
+          drop-shadow(0 0 calc(9px * var(--glow, 0))
+                      color-mix(in srgb, var(--neon) 30%, transparent)); }
 /* Ticks are the space/hailmary signature. The other three run a solid bar:
    swapping --notches for a flat gradient turns the track and both lit layers
    solid in one move, geometry and snapping untouched. */
@@ -186,16 +195,23 @@ button:hover { border-color: var(--accent); }
 :root[data-theme="light"] .f-bar .rev { filter: none; }
 /* space and hailmary keep the ticks and run roughly twice the bloom */
 :root[data-theme="space"] #sb-progress .rev {
-  filter: drop-shadow(0 0 1px var(--neon))
-          drop-shadow(0 0 4px color-mix(in srgb, var(--neon) 70%, transparent))
-          drop-shadow(0 0 9px color-mix(in srgb, var(--neon) 45%, transparent))
-          drop-shadow(0 0 18px color-mix(in srgb, var(--neon) 30%, transparent)); }
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--neon) 70%, transparent))
+          drop-shadow(0 0 calc(4px * var(--glow, 0))
+                      color-mix(in srgb, var(--neon) 70%, transparent))
+          drop-shadow(0 0 calc(9px * var(--glow, 0))
+                      color-mix(in srgb, var(--neon) 45%, transparent))
+          drop-shadow(0 0 calc(18px * var(--glow, 0))
+                      color-mix(in srgb, var(--neon) 30%, transparent)); }
 /* hailmary runs the reference's hot red-orange, white-cored and burning */
 :root[data-theme="hailmary"] #sb-progress .rev {
-  filter: drop-shadow(0 0 3px #fff9)
-          drop-shadow(0 0 12px var(--neon))
-          drop-shadow(0 0 24px var(--neon))
-          drop-shadow(0 0 48px color-mix(in srgb, var(--neon) 70%, transparent)); }
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--neon) 70%, transparent))
+          drop-shadow(0 0 calc(2px * var(--glow, 0)) #fff6)
+          drop-shadow(0 0 calc(6px * var(--glow, 0))
+                      color-mix(in srgb, var(--neon) 70%, transparent))
+          drop-shadow(0 0 calc(13px * var(--glow, 0))
+                      color-mix(in srgb, var(--neon) 45%, transparent))
+          drop-shadow(0 0 calc(24px * var(--glow, 0))
+                      color-mix(in srgb, var(--neon) 30%, transparent)); }
 #confetti { position: fixed; inset: 0; pointer-events: none; z-index: 30; }
 #filter { margin: 8px 10px; padding: 4px 8px; width: calc(100% - 20px);
   background: var(--bg); color: var(--fg); border: 1px solid var(--border);
@@ -698,8 +714,11 @@ let notch = { p: 5, pad: 3, n: 1 };
 function layoutNotches() {
   const dpr = devicePixelRatio || 1;
   const snap = n => Math.max(1, Math.round(n * dpr)) / dpr;
-  const w = snap(3);        // 3px tick in a 5px period: 60% ink, not 40%
-  notch.p = snap(5);
+  // 7px tick, 3px gap, against a 9px tick height — near-square, and wide
+  // enough that a half-pixel of rounding under zoom is ~7% of a tick rather
+  // than the ~17% that made thin ticks look ragged
+  const w = snap(7);
+  notch.p = snap(10);
   notch.pad = snap(3);
   const avail = $("sb-head").clientWidth - 24 - 2 * notch.pad;  // #sb-head padding
   notch.n = Math.max(1, Math.floor(avail / notch.p));
@@ -717,6 +736,10 @@ function setMainBar(rev, seen, total) {
                       * notch.p) + "px";
   bar.querySelector(".rev").style.width = lit(rev);
   bar.querySelector(".seen").style.width = lit(rev + seen);
+  // nothing extra for the first half, then ramp the glow to full by 100%
+  const done = total ? rev / total : 0;
+  bar.style.setProperty("--glow",
+    Math.min(1, Math.max(0, (done - 0.5) * 2)).toFixed(3));
 }
 function makeFileItem(f, label, indent) {
   const item = document.createElement("div");
