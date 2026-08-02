@@ -32,6 +32,12 @@
   --mono-font: 'JetBrains Mono';
   --line-height: 20px;
   --font-size: 12.5px;
+  /* Progress ticks: the theme's own add colour pushed toward white, so it
+     reads as a lit filament rather than paint, and a near-black trough for it
+     to burn against. Light mode keeps the flat colour — mixing toward white
+     on a white page is how you get washed out. */
+  --neon: color-mix(in srgb, var(--add-sign) 82%, #fff);
+  --trough: color-mix(in srgb, #000 58%, var(--bg));
 }
 :root[data-theme="light"] {
   --bg: #ffffff; --bg2: #f2f2f3; --fg: #1d1d1f; --fg-dim: #6e6e73;
@@ -40,6 +46,8 @@
   --add-sign: #1a7f37; --del-sign: #cf222e; --mixed: #9a6700;
   --sel-bg: rgba(95,107,122,.16); --focus-ring: #5f6b7a;
   --toast-bg: #3a3a3f; --toast-fg: #ffffff;
+  --neon: var(--add-sign);                      /* no white-mix on a white page */
+  --trough: color-mix(in srgb, #000 12%, var(--bg));
 }
 :root[data-theme="dark"] {
   --bg: #0d1117; --bg2: #161b22; --fg: #c9d1d9; --fg-dim: #8b949e;
@@ -72,6 +80,9 @@
   --add-sign: #8f9c5e; --del-sign: #b85e3a; --mixed: #c19a51;
   --sel-bg: rgba(78,143,148,.22); --focus-ring: #4e8f94;
   --toast-bg: #d2ccc0; --toast-fg: #0f0f11;
+  /* the palette's rust is too muted to read as neon: the progress bar (and
+     only the progress bar) runs a saturated version of it */
+  --neon: #ff4a1f;
 }
 /* hailmary syntax grading: coffee is close but leaves attributes the same tan as
    plain text and keywords flat grey — both matter in markup-heavy files. These
@@ -115,11 +126,76 @@ button:hover { border-color: var(--accent); }
   font-family: var(--mono-font), monospace; }
 #dirty-banner { margin-top: 6px; font-size: 12px; color: var(--mixed);
   cursor: default; display: none; }
-#sb-progress { display: flex; height: 7px; border-radius: 3px; overflow: hidden;
-  margin-top: 7px; background: color-mix(in srgb, var(--fg) 14%, transparent); }
-#sb-progress .rev { background: var(--add-sign); transition: width .3s; }
-#sb-progress .seen { background: color-mix(in srgb, var(--add-sign) 40%, transparent);
-  transition: width .3s; }
+/* ---- progress: analog notches, neon when lit ----
+   Every layer paints the same notch gradient and is anchored to the same left
+   edge, so the ticks stay in phase however wide each layer is — the lit layers
+   just stop earlier. --notch is re-declared per layer: custom properties
+   substitute at use time, so each element's gradient picks up its own colour.
+   The glow is drop-shadow, not box-shadow, so it follows the ticks instead of
+   the element's box — which also means a 0% bar glows not at all. */
+/* The tick gradient is declared on the track AND on each lit layer, never
+   inherited: a custom property's var() references are substituted on the
+   element that *declares* it, so a single inherited --notches would bake in
+   the track's grey and every layer would paint the same washed-out ticks. */
+#sb-progress, #sb-progress span {
+  --notches: repeating-linear-gradient(90deg, var(--notch) 0 var(--notch-w),
+                                       transparent var(--notch-w) var(--notch-p)); }
+#sb-progress {
+  --notch: color-mix(in srgb, var(--fg) 20%, transparent);   /* unlit ticks */
+  /* both sizes come from layoutNotches(): ticks land on whole device pixels
+     and the tick row is an exact number of ticks wide, padding excluded, so
+     no tick is half-drawn at either end */
+  --notch-w: 3px; --notch-p: 5px;      /* fallbacks; JS snaps the real values */
+  position: relative; height: 15px; margin-top: 8px;
+  width: var(--pbar-w, 100%); padding: 3px var(--pbar-pad, 3px);
+  border-radius: 3px;
+  /* Two layers: the ticks, and a recessed near-black trough for them to burn
+     against — without it the whole row greys out into the sidebar. The ticks
+     clip to the content box so none bleed into the trough's inset, which is
+     also what keeps them in phase with the lit spans above: same left edge. */
+  background-image: var(--notches), linear-gradient(var(--trough), var(--trough));
+  background-origin: content-box, border-box;
+  background-clip: content-box, border-box;
+  background-repeat: repeat, no-repeat;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #000 35%, transparent),
+              inset 0 1px 3px color-mix(in srgb, #000 45%, transparent); }
+#sb-progress span { position: absolute; left: var(--pbar-pad, 3px);
+  top: 3px; bottom: 3px;
+  background-image: var(--notches); transition: width .3s; }
+#sb-progress .seen { --notch: color-mix(in srgb, var(--neon) 72%, transparent); }
+/* A tick row is only ~60% ink where a solid bar is 100%, so at equal colour it
+   reads dimmer. The glow makes up the difference: it bleeds into the gaps and
+   the lit run becomes a band with tick texture, not a row of dashes. */
+#sb-progress .rev { --notch: var(--neon); z-index: 1;    /* over .seen */
+  filter: drop-shadow(0 0 1px var(--neon))
+          drop-shadow(0 0 2px color-mix(in srgb, var(--neon) 70%, transparent))
+          drop-shadow(0 0 5px color-mix(in srgb, var(--neon) 45%, transparent))
+          drop-shadow(0 0 9px color-mix(in srgb, var(--neon) 30%, transparent)); }
+/* Ticks are the space/hailmary signature. The other three run a solid bar:
+   swapping --notches for a flat gradient turns the track and both lit layers
+   solid in one move, geometry and snapping untouched. */
+:is(:root[data-theme="light"], :root[data-theme="dark"],
+    :root[data-theme="solarized"]) :is(#sb-progress, #sb-progress span) {
+  --notches: linear-gradient(var(--notch), var(--notch)); }
+:root[data-theme="light"] #sb-progress span,
+:root[data-theme="dark"] #sb-progress span,
+:root[data-theme="solarized"] #sb-progress span { border-radius: 2px; }
+/* the glow is the point in the dark themes; on white it only muddies, so
+   light mode gets a flat bar and leans on the trough for contrast */
+:root[data-theme="light"] #sb-progress .rev { filter: none; }
+:root[data-theme="light"] .f-bar .rev { filter: none; }
+/* space and hailmary keep the ticks and run roughly twice the bloom */
+:root[data-theme="space"] #sb-progress .rev {
+  filter: drop-shadow(0 0 1px var(--neon))
+          drop-shadow(0 0 4px color-mix(in srgb, var(--neon) 70%, transparent))
+          drop-shadow(0 0 9px color-mix(in srgb, var(--neon) 45%, transparent))
+          drop-shadow(0 0 18px color-mix(in srgb, var(--neon) 30%, transparent)); }
+/* hailmary runs the reference's hot red-orange, white-cored and burning */
+:root[data-theme="hailmary"] #sb-progress .rev {
+  filter: drop-shadow(0 0 3px #fff9)
+          drop-shadow(0 0 12px var(--neon))
+          drop-shadow(0 0 24px var(--neon))
+          drop-shadow(0 0 48px color-mix(in srgb, var(--neon) 70%, transparent)); }
 #confetti { position: fixed; inset: 0; pointer-events: none; z-index: 30; }
 #filter { margin: 8px 10px; padding: 4px 8px; width: calc(100% - 20px);
   background: var(--bg); color: var(--fg); border: 1px solid var(--border);
@@ -146,10 +222,16 @@ button:hover { border-color: var(--accent); }
 .f-counts { font-size: 10.5px; color: var(--fg-dim);
   font-family: var(--mono-font), monospace; white-space: nowrap; }
 .f-counts .plus { color: var(--add-sign); } .f-counts .minus { color: var(--del-sign); }
-.f-bar { width: 64px; height: 5px; border-radius: 2px; overflow: hidden;
-  background: color-mix(in srgb, var(--fg) 14%, transparent); display: flex; }
-.f-bar .rev { background: var(--add-sign); height: 100%; }
-.f-bar .seen { background: color-mix(in srgb, var(--add-sign) 40%, transparent); height: 100%; }
+/* file and directory bars stay solid — ticks are the main bar's signature —
+   but they light up in the same neon. drop-shadow, not box-shadow: a 0%-wide
+   solid paints nothing, so an untouched file casts no glow. */
+.f-bar { width: 64px; height: 5px; display: flex;
+  background: color-mix(in srgb, var(--fg) 14%, transparent);
+  border-radius: 2px; }
+.f-bar .rev { background: var(--neon); height: 100%; border-radius: 2px;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--neon) 75%, transparent)); }
+.f-bar .seen { background: color-mix(in srgb, var(--neon) 40%, transparent);
+  height: 100%; border-radius: 2px; }
 
 /* ---- main ---- */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -598,11 +680,43 @@ function saveCollapsed() {
 function makeBar(rev, seen, total) {
   const bar = document.createElement("span"); bar.className = "f-bar";
   const r = document.createElement("span"); r.className = "rev";
-  r.style.width = (100 * rev / total) + "%";
+  r.style.width = (100 * rev / (total || 1)) + "%";
   const s = document.createElement("span"); s.className = "seen";
-  s.style.width = (100 * seen / total) + "%";
+  s.style.width = (100 * seen / (total || 1)) + "%";
   bar.append(r, s);
   return bar;
+}
+/* ---- main progress bar ----
+   Ticks look ragged unless they land on whole device pixels, so the tick and
+   period sizes are snapped against devicePixelRatio (fractional display
+   scaling is what made them uneven), and the bar is set to an exact number of
+   whole ticks so neither end is half-drawn. The two lit layers overlap from a
+   shared left edge — that's what keeps their ticks in phase with the track's —
+   so .seen carries the *total* lit extent with .rev painted over its left end,
+   and both stop on a tick boundary: an analog meter lights whole segments. */
+let notch = { p: 5, pad: 3, n: 1 };
+function layoutNotches() {
+  const dpr = devicePixelRatio || 1;
+  const snap = n => Math.max(1, Math.round(n * dpr)) / dpr;
+  const w = snap(3);        // 3px tick in a 5px period: 60% ink, not 40%
+  notch.p = snap(5);
+  notch.pad = snap(3);
+  const avail = $("sb-head").clientWidth - 24 - 2 * notch.pad;  // #sb-head padding
+  notch.n = Math.max(1, Math.floor(avail / notch.p));
+  const s = document.documentElement.style;
+  s.setProperty("--notch-w", w + "px");
+  s.setProperty("--notch-p", notch.p + "px");
+  s.setProperty("--pbar-pad", notch.pad + "px");
+  s.setProperty("--pbar-w", (notch.n * notch.p + 2 * notch.pad) + "px");
+}
+function setMainBar(rev, seen, total) {
+  const bar = $("sb-progress");
+  // anything non-zero lights at least one tick, so early progress shows
+  const lit = v => (!total || !v ? 0
+                    : Math.min(notch.n, Math.max(1, Math.round(v / total * notch.n)))
+                      * notch.p) + "px";
+  bar.querySelector(".rev").style.width = lit(rev);
+  bar.querySelector(".seen").style.width = lit(rev + seen);
 }
 function makeFileItem(f, label, indent) {
   const item = document.createElement("div");
@@ -735,8 +849,7 @@ function renderSidebar() {
   const s = meta.stats;
   $("sb-stats").textContent =
     `${s.reviewed}/${s.blocks} reviewed · ${s.seen + s.reviewed} seen · ${meta.files.length} files`;
-  $("sb-progress").firstElementChild.style.width = (100 * s.reviewed / (s.blocks || 1)) + "%";
-  $("sb-progress").lastElementChild.style.width = (100 * s.seen / (s.blocks || 1)) + "%";
+  setMainBar(s.reviewed, s.seen, s.blocks);
   const done = s.blocks > 0 && s.reviewed >= s.blocks;
   if (allDone === null) allDone = done;          // no fanfare on page load
   else if (done && !allDone) { allDone = true; celebrate(); }
@@ -1362,6 +1475,7 @@ addEventListener("mouseup", () => {
   addEventListener("mousemove", e => {
     if (!resizing) return;
     sb.style.width = e.clientX + "px";      // clamped by min/max-width in CSS
+    layoutNotches();                        // the tick row rides the width
   });
   addEventListener("mouseup", () => {
     if (!resizing) return;
@@ -1369,6 +1483,7 @@ addEventListener("mouseup", () => {
     rz.classList.remove("active");
     document.body.style.cursor = "";
     savePref("seendiff.sbw", sb.getBoundingClientRect().width | 0);
+    if (meta) renderSidebar();              // re-snap the lit ticks
     if (file) { computeOffsets(); renderRows(); drawMinimap(); }  // pane width changed
   });
 }
@@ -2129,6 +2244,9 @@ pane.addEventListener("scroll", () => {
 });
 addEventListener("resize", () => {
   if (file) { computeOffsets(); }
+  // dpr changes when the window moves to another monitor, or on zoom
+  layoutNotches();
+  if (meta) renderSidebar();
   renderRows(); drawMinimap();
 });
 // wrap geometry depends on real glyph metrics: remeasure once webfonts land
@@ -2145,6 +2263,7 @@ $("filter").addEventListener("input", renderSidebar);
   setSplit(split);
   $("s-regex").classList.toggle("on", sRegex);
   setScope("file");
+  layoutNotches();          // before the first renderSidebar paints the bar
   await loadMeta();
   await loadWalkthrough();
   if (!meta.files.length && !wt) {   // with a walkthrough, an empty diff is fine
