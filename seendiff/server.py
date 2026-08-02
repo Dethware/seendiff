@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -33,6 +34,7 @@ _ALLOWED_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 if os.environ.get("SEENDIFF_ALLOW_HOST"):        # test/dev escape hatch only
     _ALLOWED_HOSTS.add(os.environ["SEENDIFF_ALLOW_HOST"])
 CACHE_PRUNE_DAYS = 30
+SEARCH_LIMIT = 500       # hits returned by /api/search before it gives up
 
 
 def cache_root() -> Path:
@@ -77,6 +79,7 @@ class AppState:
     # walkthrough mode (CODEWALKTHROUGH.md §2)
     wt_file: str | None = None                 # path of the JSON, if any
     wt: W.Walkthrough | None = None            # last good copy
+    wt_empty: bool = True                      # file absent/empty: plain diff
     wt_error: str | None = None                # why the latest reload failed
     wt_attempt_mtime: float = -1.0             # last mtime we tried to load
     wt_paths: set[str] = field(default_factory=set)   # wt files not in the diff
@@ -96,11 +99,20 @@ class AppState:
         A reload that fails validation leaves self.wt intact and records the
         error — the bar shows it in place of the prose, never a blank bar
         because the agent wrote a half-flushed file.
+
+        A file that is absent or empty is *not* a failure: that's the empty
+        walkthrough, seendiff plays plain diff mode and keeps watching, so the
+        agent can fill the script in while the tab stays open.
         """
         if not self.wt_file:
             return
         try:
             mtime = os.stat(self.wt_file).st_mtime
+        except FileNotFoundError:
+            self.wt, self.wt_error, self.wt_empty = None, None, True
+            self.wt_attempt_mtime = -1.0     # reload as soon as it appears
+            self._recompute_wt_paths()
+            return
         except OSError as e:
             self.wt_error = f"cannot stat walkthrough: {e}"
             return
@@ -109,6 +121,7 @@ class AppState:
         self.wt_attempt_mtime = mtime
         try:
             self.wt = W.load(self.wt_file, self.repo, self.hunk_ids())
+            self.wt_empty = self.wt is None
             self.wt_error = None
             self.wt_cache.clear()
             self._recompute_wt_paths()
@@ -222,6 +235,14 @@ def _build_file_payload(st: AppState, fd: G.FileDiff) -> dict:
     except OSError:
         pass
     return payload
+
+
+def line_text(line: dict) -> str:
+    """The plain text of a payload line, highlighted or not."""
+    toks = line.get("t")
+    if toks is not None:
+        return "".join(piece[1] for piece in toks)
+    return line.get("text") or ""
 
 
 async def _json_body(request: Request) -> dict:
@@ -354,6 +375,9 @@ def create_app(st: AppState) -> FastAPI:
             raise HTTPException(404, "no walkthrough loaded")
         st.maybe_refresh()
         st.load_walkthrough()
+        if st.wt is None and st.wt_empty:
+            # placeholder: plain diff mode, client keeps polling for a script
+            return {"empty": True}
         if st.wt is None:
             raise HTTPException(
                 422, "walkthrough failed to load:\n" + (st.wt_error or "?"))
@@ -361,6 +385,23 @@ def create_app(st: AppState) -> FastAPI:
         out["error"] = st.wt_error
         out["wt_paths"] = sorted(st.wt_paths)
         return out
+
+    @app.post("/api/walkthrough/dismiss")
+    def api_walkthrough_dismiss():
+        """Empty the script from the UI — back to the plain diff.
+
+        Truncating the file rather than just hiding the bar is what makes the
+        dismissal stick: the agent owns this file and rewrites it for the next
+        explanation, and every open tab drops the walkthrough on its next poll.
+        """
+        if not st.wt_file:
+            raise HTTPException(404, "no walkthrough loaded")
+        try:
+            Path(st.wt_file).write_text("{}\n")
+        except OSError as e:
+            raise HTTPException(500, f"cannot empty walkthrough: {e}")
+        st.load_walkthrough()
+        return {"empty": True}
 
     @app.get("/api/file")
     def api_file(path: str):
@@ -378,6 +419,52 @@ def create_app(st: AppState) -> FastAPI:
             for bm in payload.pop("block_meta")
         ]
         return payload
+
+    @app.get("/api/search")
+    def api_search(q: str, regex: bool = False, case: bool = False,
+                   limit: int = SEARCH_LIMIT):
+        """Content search across every file in the diff.
+
+        The client only ever holds the open file's payload, so a whole-change
+        search has to run here. Files go through the same cached builder
+        /api/file uses: the first search over a cold diff pays for building
+        (and highlighting) every payload, every later one is served from
+        memory. One hit per line — this feeds a result list, not a highlighter.
+        """
+        if not q:
+            return {"q": q, "total": 0, "truncated": False, "files": []}
+        try:
+            rx = re.compile(q if regex else re.escape(q),
+                            0 if case else re.IGNORECASE)
+        except re.error as e:
+            raise HTTPException(400, f"bad regex: {e}")
+        limit = max(1, min(limit, 5000))
+        st.maybe_refresh()
+        out: list[dict] = []
+        total = 0
+        truncated = False
+        for fd in st.files:
+            if truncated:
+                break
+            hits = []
+            for i, line in enumerate(_build_file_payload(st, fd)["lines"]):
+                m = rx.search(line_text(line))
+                if m is None:
+                    continue
+                hits.append({
+                    "line": i,                     # index into payload lines
+                    "new": line["new"], "old": line["old"],
+                    "type": line["type"],
+                    "text": line_text(line)[:400],
+                    "start": m.start(), "end": m.end(),
+                })
+                total += 1
+                if total >= limit:
+                    truncated = True
+                    break
+            if hits:
+                out.append({"path": fd.path, "matches": hits})
+        return {"q": q, "total": total, "truncated": truncated, "files": out}
 
     def _valid_blocks(items) -> list[tuple[str, str]]:
         out = []

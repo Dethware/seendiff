@@ -6,7 +6,7 @@ Design doc. Nothing here is implemented yet.
 
 Two halves that only make sense together:
 
-1. **A skill** (`code-walkthrough`) that turns "explain this code" / "explain this
+1. **A skill** (`code-diff`) that turns "explain this code" / "explain this
    change" into a *scripted* walkthrough — an ordered list of code references with
    layered prose — written to a JSON file.
 2. **A seendiff mode** that plays that file back: a bottom bar under the code pane
@@ -308,7 +308,7 @@ when the agent rewrites it.
 
 ## 4. The skill
 
-Lives at `skills/code-walkthrough/SKILL.md` in this repo, symlinked into
+Lives at `skills/code-diff/SKILL.md` in this repo, symlinked into
 `~/.claude/skills/` — it's used from *other* repos, so a project-level skill
 here would never fire where it's needed. README gets the one-line install.
 
@@ -406,3 +406,26 @@ shareable as a file.
 2. **Detail-off by default?** Starting with the clean spine and letting the user
    press `.` for more is arguably the better first impression, but a walkthrough
    that silently hides a third of its steps may read as thin. Leaning detail-on.
+
+## Addendum: the empty walkthrough (implemented after the fact)
+
+The skill became a *diff* skill: it launches one seendiff per conversation, on
+one randomized port, and always passes `--walkthrough
+.git/seendiff-walkthrough.json` — even when there is nothing to explain yet. So
+"no script" had to stop being a load failure and become a state.
+
+- `walkthrough.is_empty()` decides it: file missing, whitespace-only, `{}`,
+  `null`, or a document with no `steps`. `load()` returns `None` for those and
+  `check()` reports no problems; half-written JSON stays an error, so a
+  mid-flush read never reads as "dismissed".
+- `AppState.wt_empty` separates "empty, keep watching" from "broken, never
+  loaded". `GET /api/walkthrough` answers `{"empty": true}` (200) for the first
+  and 422 for the second; 404 still means the server was started without a
+  walkthrough file at all.
+- The client polls on `wtWatch` (a file is configured) rather than on `wt` (a
+  script is loaded), so a script written into the file while the tab is open is
+  adopted live — it enters walkthrough mode and toasts the title.
+- **Dismiss** in the bar `POST`s `/api/walkthrough/dismiss`, which truncates the
+  file to `{}`. Truncating rather than hiding is what makes it stick: the agent
+  owns that file, and every other open tab drops the walkthrough on its next
+  poll. `w` still just hides the bar.

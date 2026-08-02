@@ -53,6 +53,35 @@ class Valid(unittest.TestCase):
             self.assertEqual(W.check(make(tmp), tmp), [])
 
 
+class Empty(unittest.TestCase):
+    """The placeholder walkthrough: seendiff opens on the plain diff and
+    watches the file until the agent writes a script into it."""
+
+    def each(self, fn):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = str(Path(tmp) / "wt.json")
+            for body in ("", "   \n", "{}", "null", '{"version": 1}',
+                         '{"version": 1, "title": "T", "acts": [], "steps": []}'):
+                Path(p).write_text(body)
+                fn(p, tmp, body)
+
+    def test_check_and_load(self):
+        def check(p, tmp, body):
+            self.assertEqual(W.check(p, tmp), [], body)
+            self.assertIsNone(W.load(p, tmp), body)
+        self.each(check)
+
+    def test_missing_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = str(Path(tmp) / "never-written.json")
+            self.assertEqual(W.check(p, tmp), [])
+            self.assertIsNone(W.load(p, tmp))
+
+    def test_half_written_json_is_still_an_error(self):
+        # emptiness must not swallow a mid-flush write
+        self.assertFalse(W.is_empty(b'{"version": 1, "steps": [{"id"'))
+
+
 class Invalid(unittest.TestCase):
     def probs(self, mutate):
         with tempfile.TemporaryDirectory() as tmp:
@@ -128,6 +157,13 @@ class Invalid(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(
                 W.check(make(tmp, mut), tmp, hunk_ids={"a.py": {"cafe"}}), [])
+
+    def test_no_steps_is_empty_not_invalid(self):
+        # a document with an empty steps list is the placeholder, not a bug
+        with tempfile.TemporaryDirectory() as tmp:
+            p = make(tmp, lambda d: d.update(steps=[]))
+            self.assertEqual(W.check(p, tmp), [])
+            self.assertIsNone(W.load(p, tmp))
 
     def test_broken_json(self):
         with tempfile.TemporaryDirectory() as tmp:

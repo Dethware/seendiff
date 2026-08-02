@@ -279,14 +279,38 @@ def _parse(data: object, repo: str,
 
 # ------------------------------------------------------------------- public
 
+def is_empty(raw: bytes | None) -> bool:
+    """Is this the *empty* walkthrough — a placeholder, not a broken file?
+
+    The agent workflow opens seendiff with a walkthrough file that has nothing
+    in it yet and fills it in later, so "no script" has to be a first-class
+    state rather than a validation failure: a missing file (raw is None), an
+    empty/whitespace file, `{}`, `null`, or a document with no steps. Anything
+    with steps in it is a real walkthrough and gets validated in full.
+    """
+    if raw is None or not raw.strip():
+        return True
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return False              # half-written JSON is an error, not empty
+    if data is None or data == {}:
+        return True
+    return isinstance(data, dict) and not data.get("steps")
+
+
 def check(path: str, repo: str,
           hunk_ids: dict[str, set[str]] | None = None) -> list[str]:
     """All diagnostics for a walkthrough file, human-readable, empty if OK."""
     name = os.path.basename(path)
     try:
         raw = Path(path).read_bytes()
+    except FileNotFoundError:
+        return []                 # not written yet: the empty walkthrough
     except OSError as e:
         return [f"{name}: cannot read: {e}"]
+    if is_empty(raw):
+        return []
     try:
         data = json.loads(raw)
     except ValueError as e:
@@ -296,13 +320,21 @@ def check(path: str, repo: str,
 
 
 def load(path: str, repo: str,
-         hunk_ids: dict[str, set[str]] | None = None) -> Walkthrough:
-    """Parse + validate + resolve; raises WalkthroughError with everything."""
+         hunk_ids: dict[str, set[str]] | None = None) -> Walkthrough | None:
+    """Parse + validate + resolve; raises WalkthroughError with everything.
+
+    Returns None for the empty walkthrough (see is_empty) — the caller falls
+    back to plain diff mode and keeps watching the file.
+    """
     try:
         raw = Path(path).read_bytes()
         mtime = os.stat(path).st_mtime
+    except FileNotFoundError:
+        return None
     except OSError as e:
         raise WalkthroughError([f"cannot read {path}: {e}"])
+    if is_empty(raw):
+        return None
     try:
         data = json.loads(raw)
     except ValueError as e:

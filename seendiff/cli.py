@@ -71,7 +71,11 @@ def main(argv: list[str] | None = None) -> int:
         if problems:
             return 1
         wt = W.load(args.check_walkthrough, repo, hunk_ids)
-        print(f"ok: {wt.title!r} — {len(wt.acts)} acts, {len(wt.steps)} steps")
+        if wt is None:
+            print("ok: empty walkthrough (plain diff until it's written)")
+        else:
+            print(f"ok: {wt.title!r} — {len(wt.acts)} acts, "
+                  f"{len(wt.steps)} steps")
         return 0
 
     st = AppState(repo=repo, base_ref=base_ref,
@@ -90,11 +94,15 @@ def main(argv: list[str] | None = None) -> int:
     app = create_app(st)          # runs the initial refresh
     if args.walkthrough:
         st.load_walkthrough()     # fail loudly at load, not in the browser
-        if st.wt is None:
+        if st.wt is None and not st.wt_empty:
             print("seendiff: walkthrough failed to load:", file=sys.stderr)
             for p in (st.wt_error or "?").splitlines():
                 print(f"  {p}", file=sys.stderr)
             return 1
+        if st.wt is None:
+            # the agent flow: open on the plain diff now, script arrives later
+            print(f"seendiff: empty walkthrough — plain diff, watching "
+                  f"{args.walkthrough}", file=sys.stderr)
     port = args.port or free_port()
     url = f"http://127.0.0.1:{port}/"
     print(f"seendiff: {st.branch or 'detached'} vs {base_ref} "

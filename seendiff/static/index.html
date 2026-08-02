@@ -221,6 +221,7 @@ button:hover { border-color: var(--accent); }
 #wt-bar.d1 #wt-head, #wt-bar.d1 #wt-text, #wt-bar.d1 #wt-refs { padding-left: 28px; }
 #wt-sp { flex: 1; }
 #wt-hint { color: var(--fg-dim); font-size: 11px; white-space: nowrap; }
+#wt-dismiss { font-size: 11px; white-space: nowrap; }
 #wt-text { flex: 1; overflow-y: auto; padding: 4px 14px; font-size: 13px;
   line-height: 1.5; min-height: 0; }
 #wt-text.err { color: var(--del-sign); white-space: pre-wrap;
@@ -266,6 +267,59 @@ button:hover { border-color: var(--accent); }
 .wt-o-step.d1 { padding-left: 32px; color: var(--fg-dim); }
 .wt-files-head { padding: 8px 12px 2px; color: var(--fg-dim); font-size: 10.5px;
   font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+
+/* ---- search ---- */
+#searchbar { flex: none; display: flex; align-items: center; gap: 6px;
+  padding: 5px 12px; background: var(--bg2);
+  border-bottom: 1px solid var(--border); }
+#searchbar[hidden] { display: none; }
+#s-input { flex: 1; min-width: 0; padding: 3px 8px; background: var(--bg);
+  color: var(--fg); border: 1px solid var(--border); border-radius: 4px;
+  font-family: var(--mono-font), monospace; font-size: 12px; }
+#s-input:focus { outline: 1px solid var(--accent); }
+#s-input.bad { border-color: var(--del-sign); }
+#s-count { color: var(--fg-dim); font-size: 11.5px; white-space: nowrap;
+  font-family: var(--mono-font), monospace; min-width: 7em; text-align: right; }
+#searchbar button { font-size: 11.5px; padding: 1px 7px; }
+#searchbar button.on { border-color: var(--accent); color: var(--accent); }
+/* the match itself keeps its syntax colour: only the background moves */
+mark { background: color-mix(in srgb, var(--mixed) 35%, transparent);
+  color: inherit; border-radius: 2px; }
+mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
+  box-shadow: 0 0 0 1px var(--mixed); }
+/* results live in their own right-hand sidebar: it appears with a search
+   session, survives closing and reopening the bar, and can be dismissed on
+   its own — a new query brings it back. */
+#s-panel { width: 320px; min-width: 180px; max-width: 50vw; flex: none;
+  background: var(--bg2); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; position: relative; }
+#s-panel[hidden] { display: none; }
+#sp-resizer { position: absolute; top: 0; left: -3px; width: 6px; height: 100%;
+  cursor: col-resize; z-index: 5; }
+#sp-resizer:hover, #sp-resizer.active { background: var(--accent); opacity: .5; }
+#sp-head { display: flex; align-items: baseline; gap: 8px; flex: none;
+  padding: 8px 10px 6px; border-bottom: 1px solid var(--border); }
+#sp-title { font-weight: 600; font-size: 12.5px; }
+#sp-sub { color: var(--fg-dim); font-size: 11px; flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sp-close { font-size: 11px; flex: none; padding: 0 5px; }
+#s-results { overflow-y: auto; flex: 1; padding-bottom: 12px; }
+.sr-file { padding: 7px 10px 2px; font-family: var(--mono-font), monospace;
+  font-size: 11.5px; color: var(--fg-dim); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.sr-file bdi { unicode-bidi: plaintext; }
+.sr-hit { display: flex; gap: 6px; padding: 1px 10px 1px 14px; cursor: pointer;
+  border-left: 2px solid transparent; }
+.sr-hit:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.sr-hit.cur { border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.sr-ln { flex: none; width: 3.6em; text-align: right; color: var(--fg-dim);
+  font-family: var(--mono-font), monospace; font-size: 10.5px; }
+.sr-hit.add .sr-ln { color: var(--add-sign); }
+.sr-hit.del .sr-ln { color: var(--del-sign); }
+.sr-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-family: var(--mono-font), monospace; font-size: 11.5px; }
+#s-note { padding: 14px 12px; color: var(--fg-dim); font-size: 12px; }
 
 /* ---- minimap ---- */
 #minimap { flex: none; width: 14px; cursor: pointer; background: var(--bg2);
@@ -328,6 +382,16 @@ button:hover { border-color: var(--accent); }
     <button id="btn-theme" title="cycle theme (t)"></button>
     <button id="btn-keys" title="keyboard shortcuts (?)">keys?</button>
   </div>
+  <div id="searchbar" hidden>
+    <input id="s-input" placeholder="search this file" spellcheck="false">
+    <span id="s-count"></span>
+    <button id="s-prev" title="previous match (⇧⏎)">↑</button>
+    <button id="s-next" title="next match (⏎)">↓</button>
+    <button id="s-scope" title="search this file / all changed files (⇥)">this file</button>
+    <button id="s-regex" title="regular expression">.*</button>
+    <button id="s-panel-btn" title="show / hide the results panel">results</button>
+    <button id="s-close" title="close search (Esc)">✕</button>
+  </div>
   <div id="pane-wrap">
     <div id="pane"><div id="spacer"></div></div>
     <canvas id="minimap"></canvas>
@@ -338,13 +402,24 @@ button:hover { border-color: var(--accent); }
       <span id="wt-act"></span><span id="wt-count"></span>
       <span id="wt-title"></span><span id="wt-tag">detail</span>
       <span id="wt-sp"></span>
-      <span id="wt-hint">← → step · [ ] act · . detail · w exit</span>
+      <span id="wt-hint">← → step · [ ] act · . detail · w hide</span>
+      <button id="wt-dismiss"
+        title="dismiss this walkthrough — back to the plain diff">dismiss ✕</button>
     </div>
     <div id="wt-text"></div>
     <div id="wt-refs"></div>
     <div id="wt-pips"></div>
   </div>
 </main>
+<aside id="s-panel" hidden>
+  <div id="sp-resizer" title="drag to resize"></div>
+  <div id="sp-head">
+    <span id="sp-title">results</span>
+    <span id="sp-sub"></span>
+    <button id="sp-close" title="dismiss the results panel">✕</button>
+  </div>
+  <div id="s-results"></div>
+</aside>
 <div id="help-overlay">
   <div id="help">
     <div id="help-title">Keyboard shortcuts</div>
@@ -360,6 +435,7 @@ button:hover { border-color: var(--accent); }
       <tr><td>y</td><td>copy ref + content (selection or focused block)</td></tr>
       <tr><td>Y</td><td>copy refs for all unreviewed blocks in file</td></tr>
       <tr><td>s</td><td>toggle side-by-side / unified</td></tr>
+      <tr><td>Ctrl-F</td><td>search — ⏎ / ⇧⏎ next / prev · ⇥ this file / all files · Esc closes</td></tr>
       <tr><td>g</td><td>focus file filter</td></tr>
       <tr><td>h</td><td>hide fully-reviewed files</td></tr>
       <tr><td>t</td><td>cycle theme</td></tr>
@@ -417,6 +493,8 @@ let selAnchor = null, selEnd = null;   // gutter selection, view row indices
 
 /* ---------- walkthrough state (CODEWALKTHROUGH.md §3) ---------- */
 let wt = null;              // /api/walkthrough payload, or null
+let wtWatch = false;        // a walkthrough file is configured (maybe empty):
+                            // keep polling, the script can arrive any time
 let wtStep = -1, wtOn = false, wtDetail = true, wtVisited = new Set();
 let wtHi = null;            // {r0, r1} view-row range of the current step's ref
 let wtAnchors = new Set();  // view rows carrying anchor dots (current step only)
@@ -714,6 +792,7 @@ async function openFile(path, focusLine) {
   measureMetrics();
   computeOffsets();
   wtRecompute();
+  runFileSearch();      // hits are line-indexed: rescan whenever the file changes
   pane.scrollTop = focusLine
     ? Math.max(0, offsets[viewOf[Math.min(focusLine - 1, file.lines.length - 1)]]
                   - pane.clientHeight / 3)
@@ -902,15 +981,47 @@ function renderRows() {
     }
   }
 }
-function contentEl(l) {
+function appendTok(parent, cls, text, hit) {
+  let node = parent;
+  if (hit) {
+    node = document.createElement("mark");
+    if (hit === sMatches[sIdx]) node.className = "cur";
+    parent.append(node);
+  }
+  if (cls) {
+    const sp = document.createElement("span");
+    sp.className = cls; sp.textContent = text;
+    node.append(sp);
+  } else node.append(text);
+}
+function contentEl(l, idx) {
   const content = document.createElement("pre");
   content.className = "content hl";
   if (!l) return content;
-  if (l.t) for (const [cls, text] of l.t) {
-    if (cls) { const sp = document.createElement("span"); sp.className = cls;
-               sp.textContent = text; content.append(sp); }
-    else content.append(text);
-  } else content.textContent = l.text ?? "";
+  const toks = l.t || [["", l.text ?? ""]];
+  const hits = idx == null ? null : sByLine.get(idx);
+  if (!hits) {
+    for (const [cls, text] of toks) appendTok(content, cls, text, null);
+    return content;
+  }
+  // a match can straddle several highlight tokens, and a token can hold
+  // several matches: walk both lists together, splitting tokens at match
+  // boundaries so every piece keeps its syntax class inside the <mark>
+  let pos = 0, hi = 0;
+  for (const [cls, text] of toks) {
+    let off = 0;
+    while (off < text.length) {
+      while (hi < hits.length && hits[hi].e <= pos + off) hi++;
+      const h = hits[hi];
+      let end, inside = null;
+      if (!h || h.s >= pos + text.length) end = text.length;   // no hit here
+      else if (h.s > pos + off) end = h.s - pos;               // up to the hit
+      else { end = Math.min(text.length, h.e - pos); inside = h; }
+      appendTok(content, cls, text.slice(off, end), inside);
+      off = end;
+    }
+    pos += text.length;
+  }
   return content;
 }
 function chkEl(v) {
@@ -939,7 +1050,7 @@ function buildUnifiedRow(v) {
   const sign = document.createElement("span");
   sign.className = "sign";
   sign.textContent = l.type === "add" ? "+" : l.type === "del" ? "−" : " ";
-  el.append(lnOld, lnNew, chkEl(v), sign, contentEl(l));
+  el.append(lnOld, lnNew, chkEl(v), sign, contentEl(l, viewRows[v][0]));
   return el;
 }
 function buildSplitRow(v) {
@@ -962,7 +1073,7 @@ function halfEl(v, side) {
   const sign = document.createElement("span");
   sign.className = "sign";
   sign.textContent = !l || l.type === "context" ? " " : l.type === "add" ? "+" : "−";
-  h.append(ln, sign, contentEl(l));
+  h.append(ln, sign, contentEl(l, idx));
   return h;
 }
 function clearRows() { for (const el of rowEls.values()) el.remove(); rowEls.clear(); }
@@ -997,6 +1108,18 @@ function drawMinimap() {
       ctx.fillRect(2, y, w - 4, bh);
       ctx.globalAlpha = 1;
     }
+  }
+  if (sOpen && sMatches.length) {        // search hits: short ticks, current full
+    ctx.fillStyle = getComputedStyle(document.documentElement)
+                    .getPropertyValue("--mixed").trim();
+    const drawn = new Set();             // one tick per pixel row, not per hit
+    sMatches.forEach((m, k) => {
+      const y = Math.round(offsets[viewOf[m.i]] / T * h);
+      if (k !== sIdx) { if (drawn.has(y)) return; drawn.add(y); }
+      ctx.globalAlpha = k === sIdx ? 1 : .55;
+      ctx.fillRect(0, y, k === sIdx ? w : 4, k === sIdx ? 2 : 1.5);
+    });
+    ctx.globalAlpha = 1;
   }
   if (wtHi || wtAnchors.size) {
     const accent = getComputedStyle(document.documentElement)
@@ -1332,9 +1455,35 @@ $("btn-hide").onclick = () => {
 async function loadWalkthrough() {
   try {
     const r = await fetch("/api/walkthrough");
-    wt = r.ok ? await r.json() : null;
+    wtWatch = r.status !== 404;      // 404 = server started without a file
+    const d = r.ok ? await r.json() : null;
+    // {empty:true} is the placeholder walkthrough: plain diff, keep watching
+    wt = d && !d.empty ? d : null;
   } catch (e) { wt = null; }
   $("help-wt").hidden = !wt;
+}
+/* the script arrived (or was rewritten) while the tab was open */
+function wtAdopt(nw) {
+  wt = nw;
+  wtVisited = new Set();
+  wtStep = Math.max(0, wtRestoreProgress());
+  $("help-wt").hidden = false;
+  const em = $("empty-msg");
+  if (em) em.remove();               // an empty diff is fine with a walkthrough
+  renderSidebar();
+  setWalkthrough(true);
+  toast(wt.title);
+}
+/* dismissed, or emptied on disk: drop every trace and go back to the diff */
+function wtClear(msg) {
+  wt = null; wtOn = false; wtStep = -1; wtAway = false;
+  wtVisited = new Set(); wtHi = null; wtAnchors = new Set();
+  $("wt-bar").hidden = true;
+  $("help-wt").hidden = true;
+  renderWtOutline();
+  if (file) { computeOffsets(); renderRows(); drawMinimap(); }
+  renderSidebar(); updateHash();
+  if (msg) toast(msg);
 }
 function wtStepIdx(id) { return wt ? wt.steps.findIndex(s => s.id === id) : -1; }
 function wtSeq() {          // step indices in play: all, or the depth-0 spine
@@ -1538,15 +1687,24 @@ function setWalkthrough(on) {
   }
   renderWtOutline();
 }
+$("wt-dismiss").onclick = async () => {
+  try {
+    const r = await fetch("/api/walkthrough/dismiss", { method: "POST" });
+    if (!r.ok) { toast("dismiss failed"); return; }
+  } catch (e) { toast("dismiss failed"); return; }
+  wtClear("walkthrough dismissed");
+};
 /* live reload: rides the 2 s interval that already exists for seen-flushing */
 let wtPollBusy = false;
 async function wtPoll() {
-  if (!wt || wtPollBusy) return;
+  if (!wtWatch || wtPollBusy) return;
   wtPollBusy = true;
   try {
     const r = await fetch("/api/walkthrough");
     if (!r.ok) return;
     const nw = await r.json();
+    if (nw.empty) { if (wt) wtClear("walkthrough dismissed"); return; }
+    if (!wt) { wtAdopt(nw); return; }
     if (nw.digest !== wt.digest) {
       const curId = wtStep >= 0 ? wt.steps[wtStep].id : null;
       wt = nw;
@@ -1598,8 +1756,303 @@ function updateHash() {
   });
 }
 
+/* ---------- search ----------
+   The pane is virtualized, so the browser's own find can only see the ~60 rows
+   currently in the DOM: Ctrl+F is intercepted and matched against file.lines[]
+   instead. Whole-change search can't run here at all — the client holds one
+   file's payload — so it goes to /api/search. */
+const SEARCH_MAX = 5000;         // in-file match cap, keeps the minimap honest
+const PANEL_MAX = 300;           // result rows rendered, the rest is a note
+let sOpen = false;               // the bar is showing
+let sScope = "file";             // "file" | "all"
+let sRegex = localStorage.getItem("seendiff.sregex") === "1";
+let sQuery = "";
+let sMatches = [];               // in-file hits: {i: line index, s, e}
+let sByLine = new Map();         // line index -> its hits (for the renderer)
+let sIdx = -1;                   // current hit in sMatches
+let sGlobal = null;              // /api/search payload for sQuery, or null
+let sCur = null;                 // "path|line" of the opened result
+let sPanel = true;               // panel wanted (survives closing the bar)
+let sTimer = null;
+
+function searchRe(q) {
+  if (!q) return null;
+  // smart case: an all-lowercase query is case-insensitive
+  const flags = "g" + (/[A-Z]/.test(q) ? "" : "i");
+  const body = sRegex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  try { return new RegExp(body, flags); } catch (e) { return null; }
+}
+function runFileSearch() {
+  sMatches = []; sByLine = new Map(); sIdx = -1;
+  const re = searchRe(sQuery);
+  $("s-input").classList.toggle("bad", !!sQuery && !re);
+  if (!re || !file) return;
+  scan:
+  for (let i = 0; i < file.lines.length; i++) {
+    const text = rowText(file.lines[i]);
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text))) {
+      if (m[0] === "") { re.lastIndex++; continue; }   // zero-width: no mark
+      const hit = { i, s: m.index, e: m.index + m[0].length };
+      sMatches.push(hit);
+      if (!sByLine.has(i)) sByLine.set(i, []);
+      sByLine.get(i).push(hit);
+      if (sMatches.length >= SEARCH_MAX) break scan;
+    }
+  }
+}
+function nearestMatch(fromRow) {      // first hit at or after a view row
+  for (let k = 0; k < sMatches.length; k++)
+    if (viewOf[sMatches[k].i] >= fromRow) return k;
+  return sMatches.length ? 0 : -1;
+}
+function gotoMatch(k) {
+  if (!sMatches.length) { sIdx = -1; redrawSearch(); return; }
+  sIdx = ((k % sMatches.length) + sMatches.length) % sMatches.length;
+  const v = viewOf[sMatches[sIdx].i];
+  const top = offsets[v], bot = offsets[v + 1];
+  if (top < pane.scrollTop || bot > pane.scrollTop + pane.clientHeight)
+    pane.scrollTop = Math.max(0, (top + bot) / 2 - pane.clientHeight / 2);
+  redrawSearch();
+}
+function redrawSearch() {   // marks are baked into row DOM: rebuild the rows
+  clearRows(); renderRows(); drawMinimap(); renderSearchCount(); renderResults();
+}
+function renderSearchCount() {
+  const c = $("s-count");
+  if (!sQuery) { c.textContent = ""; return; }
+  if (sScope === "all") {
+    c.textContent = sGlobal
+      ? (sGlobal.total ? sGlobal.total + (sGlobal.truncated ? "+" : "")
+                         + " in " + sGlobal.files.length + " files"
+                       : "no matches")
+      : "…";
+    return;
+  }
+  c.textContent = sMatches.length
+    ? (sIdx + 1) + "/" + sMatches.length + (sMatches.length >= SEARCH_MAX ? "+" : "")
+    : "no matches";
+}
+
+/* ---- results panel ---- */
+function resultRows() {   // [path, {line, new, old, type, text, start, end}]
+  const out = [];
+  if (sScope === "all") {
+    if (sGlobal) for (const f of sGlobal.files)
+      for (const m of f.matches) out.push([f.path, m]);
+    return out;
+  }
+  if (!file) return out;
+  let last = -1;
+  for (const h of sMatches) {          // one row per line, like the server does
+    if (h.i === last) continue;
+    last = h.i;
+    const l = file.lines[h.i];
+    out.push([curPath, { line: h.i, new: l.new, old: l.old, type: l.type,
+                         text: rowText(l).slice(0, 400), start: h.s, end: h.e }]);
+  }
+  return out;
+}
+function snippet(el, text, s, e) {
+  el.append(text.slice(0, s).replace(/^\s+/, ""));
+  const mk = document.createElement("mark");
+  mk.textContent = text.slice(s, e);
+  el.append(mk, text.slice(e));
+}
+function renderResults() {
+  const p = $("s-panel");
+  p.hidden = !(sOpen && sPanel);
+  $("s-panel-btn").classList.toggle("on", sPanel);
+  if (p.hidden) return;
+  $("sp-sub").textContent = sScope === "all" ? "all changed files" : "this file";
+  const box = $("s-results");
+  box.textContent = "";
+  const note = msg => {
+    const d = document.createElement("div");
+    d.id = "s-note"; d.textContent = msg; box.append(d);
+  };
+  if (!sQuery) { note("type to search"); return; }
+  if (sScope === "all" && !sGlobal) { note("searching…"); return; }
+  const all = resultRows();
+  if (!all.length) {
+    note(sScope === "all" ? "no matches in the change" : "no matches in this file");
+    return;
+  }
+  // the list is rebuilt on every ⏎: don't hand it thousands of rows
+  const rows = all.slice(0, PANEL_MAX);
+  let lastPath = null;
+  for (const [path, m] of rows) {
+    if (path !== lastPath) {
+      lastPath = path;
+      const head = document.createElement("div");
+      head.className = "sr-file"; head.title = path;
+      const bdi = document.createElement("bdi");
+      bdi.textContent = path;
+      head.append(bdi);
+      box.append(head);
+    }
+    const key = path + "|" + m.line;
+    const el = document.createElement("div");
+    el.className = "sr-hit " + m.type + (key === sCur ? " cur" : "");
+    const ln = document.createElement("span");
+    ln.className = "sr-ln"; ln.textContent = m.new ?? m.old ?? "";
+    const tx = document.createElement("span");
+    tx.className = "sr-txt";
+    snippet(tx, m.text, m.start, m.end);
+    el.append(ln, tx);
+    el.onclick = () => openResult(path, m);
+    box.append(el);
+  }
+  if (rows.length < all.length)
+    note("showing " + rows.length + " of " + all.length + " lines");
+  else if (sScope === "all" && sGlobal.truncated)
+    note("stopped at " + sGlobal.total + " matches — narrow the query");
+  box.querySelector(".sr-hit.cur")?.scrollIntoView({ block: "nearest" });
+}
+async function openResult(path, m) {
+  sCur = path + "|" + m.line;
+  if (path !== curPath) await openFile(path);    // openFile re-runs the scan
+  const k = nearestMatch(viewOf[m.line] ?? 0);
+  gotoMatch(k >= 0 ? k : 0);
+}
+function stepResult(dir) {         // ⏎ / ⇧⏎ in whole-change mode
+  const rows = resultRows();
+  if (!rows.length) return;
+  let k = rows.findIndex(([p, m]) => p + "|" + m.line === sCur);
+  k = k < 0 ? (dir > 0 ? 0 : rows.length - 1)
+            : ((k + dir) % rows.length + rows.length) % rows.length;
+  openResult(rows[k][0], rows[k][1]);
+}
+
+/* ---- whole-change search ---- */
+function scheduleGlobal() {
+  clearTimeout(sTimer);
+  sTimer = setTimeout(runGlobalSearch, 200);
+}
+async function runGlobalSearch() {
+  clearTimeout(sTimer);
+  if (sScope !== "all" || !sQuery) { renderResults(); return; }
+  const q = sQuery;
+  try {
+    const r = await fetch("/api/search?q=" + encodeURIComponent(q)
+      + "&regex=" + (sRegex ? "true" : "false")
+      + "&case=" + (/[A-Z]/.test(q) ? "true" : "false"));
+    if (q !== sQuery) return;                 // a later keystroke won the race
+    $("s-input").classList.toggle("bad", !r.ok);
+    sGlobal = r.ok ? await r.json() : { total: 0, truncated: false, files: [] };
+  } catch (e) {
+    sGlobal = { total: 0, truncated: false, files: [] };
+  }
+  if (q !== sQuery) return;
+  renderResults(); renderSearchCount();
+}
+
+/* ---- open / close / modes ---- */
+function paneResized() {    // the bar and panel both change the pane's box
+  if (!file) return;
+  computeOffsets(); renderRows(); drawMinimap();
+}
+function openSearch() {
+  // reopening keeps the previous query, its results and the panel: only a new
+  // query resets that state
+  sOpen = true;
+  $("searchbar").hidden = false;
+  renderResults();
+  paneResized();
+  const inp = $("s-input");
+  inp.value = sQuery;
+  inp.focus(); inp.select();
+  renderSearchCount();
+}
+function closeSearch() {
+  if (!sOpen) return;
+  sOpen = false;
+  $("searchbar").hidden = true;
+  $("s-input").blur();
+  renderResults();                    // hides the panel, keeps sPanel wanted
+  paneResized();
+}
+function setScope(scope) {
+  sScope = scope;
+  $("s-scope").textContent = scope === "all" ? "all files" : "this file";
+  $("s-input").placeholder =
+    scope === "all" ? "search all changed files" : "search this file";
+  if (scope === "all" && !sGlobal) runGlobalSearch();
+  else { renderResults(); renderSearchCount(); }
+}
+function queryChanged() {
+  sQuery = $("s-input").value;
+  sGlobal = null; sCur = null;
+  sPanel = true;                      // a new query brings a dismissed panel back
+  runFileSearch();
+  if (sMatches.length) gotoMatch(nearestMatch(findRow(pane.scrollTop)));
+  else redrawSearch();
+  if (sScope === "all") scheduleGlobal();
+}
+$("s-input").addEventListener("input", queryChanged);
+$("s-next").onclick = () =>
+  sScope === "all" ? stepResult(1) : gotoMatch(sIdx + 1);
+$("s-prev").onclick = () =>
+  sScope === "all" ? stepResult(-1) : gotoMatch(sIdx - 1);
+$("s-scope").onclick = () => setScope(sScope === "file" ? "all" : "file");
+$("s-regex").onclick = () => {
+  sRegex = !sRegex;
+  savePref("seendiff.sregex", sRegex ? "1" : "0");
+  $("s-regex").classList.toggle("on", sRegex);
+  sGlobal = null;
+  runFileSearch();
+  redrawSearch();
+  if (sScope === "all") scheduleGlobal();
+};
+$("s-panel-btn").onclick = () => {
+  sPanel = !sPanel;
+  $("s-panel-btn").classList.toggle("on", sPanel);
+  renderResults(); paneResized();
+};
+$("sp-close").onclick = () => $("s-panel-btn").onclick();
+$("s-close").onclick = closeSearch;
+/* panel resize: same pattern as the sidebar resizer, mirrored */
+{
+  const p = $("s-panel"), rz = $("sp-resizer");
+  const saved = parseInt(localStorage.getItem("seendiff.spw") || "0", 10);
+  if (saved) p.style.width = saved + "px";
+  let resizing = false;
+  rz.addEventListener("mousedown", e => {
+    e.preventDefault();
+    resizing = true; rz.classList.add("active");
+    document.body.style.cursor = "col-resize";
+  });
+  addEventListener("mousemove", e => {
+    if (resizing) p.style.width = (innerWidth - e.clientX) + "px";
+  });
+  addEventListener("mouseup", () => {
+    if (!resizing) return;
+    resizing = false; rz.classList.remove("active");
+    document.body.style.cursor = "";
+    savePref("seendiff.spw", p.getBoundingClientRect().width | 0);
+    paneResized();
+  });
+}
+
 /* ---------- keymap (PLAN.md §12) ---------- */
 addEventListener("keydown", e => {
+  // before the ctrl/meta bail-out below: Ctrl+F must beat the browser's own
+  // find, which can only see the handful of rows the virtualizer has rendered
+  if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
+    e.preventDefault(); openSearch(); return;
+  }
+  if (e.target === $("s-input")) {
+    if (e.key === "Escape") { e.preventDefault(); closeSearch(); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      const dir = e.shiftKey ? -1 : 1;
+      if (sScope === "all") stepResult(dir); else gotoMatch(sIdx + dir);
+    } else if (e.key === "Tab") {
+      e.preventDefault(); setScope(sScope === "file" ? "all" : "file");
+    }
+    return;
+  }
   if (e.target === $("filter")) {
     if (e.key === "Escape") $("filter").blur();
     if (e.key === "Enter") {
@@ -1614,7 +2067,8 @@ addEventListener("keydown", e => {
   const stop = () => e.preventDefault();
   const confirming = $("confirm-overlay").classList.contains("show");
   if (k === "Escape") {
-    toggleHelp(false); $("confirm-overlay").classList.remove("show"); return;
+    toggleHelp(false); $("confirm-overlay").classList.remove("show");
+    closeSearch(); return;
   }
   if (confirming) {
     if (k === "Enter") { stop(); doResetAll(); }
@@ -1689,6 +2143,8 @@ $("filter").addEventListener("input", renderSidebar);
   setTheme(document.documentElement.dataset.theme);
   setFont(localStorage.getItem("seendiff.font") || FONTS[0]);
   setSplit(split);
+  $("s-regex").classList.toggle("on", sRegex);
+  setScope("file");
   await loadMeta();
   await loadWalkthrough();
   if (!meta.files.length && !wt) {   // with a walkthrough, an empty diff is fine

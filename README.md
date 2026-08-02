@@ -63,6 +63,23 @@ It picks a free port, starts a localhost server, and opens your browser. Ctrl-C 
 
 Useful flags: `--port`, `--no-browser`, `--no-highlight`, `--no-auto-seen`.
 
+### Search
+
+`Ctrl-F` opens the search bar. It searches **the open file** by default; `⇥`
+(or the scope button) switches to **all changed files**. Results land in a
+right-hand panel — click one to jump, `⏎` / `⇧⏎` walk them, `Esc` closes.
+
+The browser's own find can't help here: the code pane is virtualized, so only
+the rows on screen exist in the DOM. seendiff matches against the diff data
+instead, marks every hit in place (keeping its syntax colour), and ticks them
+on the minimap. Whole-change search runs server-side via `/api/search`, since
+the page only ever holds one file.
+
+Queries are literal and smart-cased — all-lowercase matches any case, any
+capital makes it case-sensitive. `.*` toggles regex. Removed lines are
+searchable too. Reopening with `Ctrl-F` keeps the last query, its results and
+the panel; a new query resets them (and brings a dismissed panel back).
+
 ### Walkthroughs
 
 seendiff can play back a *scripted code walkthrough* — an ordered, layered
@@ -76,14 +93,22 @@ seendiff --check-walkthrough path/to/wt.json            # validate, exit 0/1
 ```
 
 A bar under the code pane carries the current step's prose; `←`/`→` step
-through the script, `[`/`]` jump acts, `.` toggles detail steps, `w` exits
-walkthrough mode. Works with or without a diff — any file in the repo is
-openable while a walkthrough is loaded.
+through the script, `[`/`]` jump acts, `.` toggles detail steps, `w` hides the
+bar, and **dismiss** drops the walkthrough entirely and returns to the plain
+diff. Works with or without a diff — any file in the repo is openable while a
+walkthrough is loaded.
 
-To let Claude write walkthroughs for any repo, symlink the skill once:
+The walkthrough file may be **empty** (`{}`, no steps, or not written yet).
+That's not an error: seendiff opens as a plain diff reviewer and watches the
+file, so an agent can write a script into it later and every open tab picks it
+up within a couple of seconds — no relaunch, no new tab. That's how the skill
+runs: one server per conversation, launched with an empty walkthrough up front.
+
+To let Claude show diffs and write walkthroughs for any repo, symlink the skill
+once:
 
 ```bash
-ln -s "$(pwd)/skills/code-walkthrough" ~/.claude/skills/code-walkthrough
+ln -s "$(pwd)/skills/code-diff" ~/.claude/skills/code-diff
 ```
 
 ### Keys
@@ -99,6 +124,7 @@ ln -s "$(pwd)/skills/code-walkthrough" ~/.claude/skills/code-walkthrough
 | `y` | copy a `path:line` ref for the focused block, with its content |
 | `Y` | copy refs for everything still unreviewed |
 | `j` `k` `d` `u` | scroll |
+| `Ctrl-F` | search — `⏎`/`⇧⏎` next / previous, `⇥` this file / all files |
 | `g` | focus the file filter |
 | `h` | hide fully-reviewed files |
 | `t` | cycle theme &nbsp;•&nbsp; `?` help &nbsp;•&nbsp; `X` reset all state |
