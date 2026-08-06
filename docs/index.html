@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en" data-theme="space">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>seendiff — a local diff reviewer for large diffs</title>
+<meta name="description" content="A local, point-in-time diff reviewer for large diffs. Understand big changes made by LLMs and AI coding harnesses, track what you've reviewed, and let the AI walk you through the code.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%23111113'/><rect x='2' y='7' width='8' height='3' fill='%23c3d6b3'/></svg>">
+<meta property="og:title" content="seendiff">
+<meta property="og:description" content="A local, point-in-time diff reviewer for large diffs.">
+<meta property="og:type" content="website">
+<style>
+@font-face { font-family: 'JetBrains Mono'; font-weight: 400 700;
+  font-display: swap; src: url('fonts/JetBrainsMono.woff2') format('woff2'); }
+
+:root {
+  --bg: #111113; --bg2: #1a1a1d; --fg: #b8bbc2; --fg-dim: #77797f;
+  --border: #2b2b30; --accent: #9aa4ae;
+  --add: #a3be8c; --del: #bf616a;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 400 14px/1.65 var(--mono); letter-spacing: .01em; }
+main { max-width: 1000px; margin: 0 auto; padding: 0 32px 96px; }
+a { color: var(--fg); text-underline-offset: 3px;
+  text-decoration-color: var(--border); }
+a:hover { text-decoration-color: var(--fg-dim); }
+h1, h2 { font-weight: 700; letter-spacing: -.01em; }
+p { margin: 0 0 14px; }
+code { font: inherit; }
+
+/* ── hero: centred, and short enough to read in one breath ─ */
+header { padding: 92px 0 8px; text-align: center; }
+h1 { margin: 0; font-size: 36px; }
+.tagline { margin: 14px auto 0; font-size: 17px; max-width: 64ch; }
+.sub { margin: 10px auto 0; color: var(--fg-dim); max-width: 56ch; }
+.sub strong { color: var(--fg); font-weight: 700; }
+
+/* the stack, stated as a stamp — it is the pitch, not a footnote */
+.stack { margin: 20px 0 0; font-size: 11.5px; color: var(--fg-dim);
+  text-transform: uppercase; letter-spacing: .2em; }
+.stack strong { color: var(--fg); font-weight: 400; }
+
+.repo { display: inline-flex; align-items: center; gap: 12px;
+  margin: 26px 0 0; font-size: 17px;
+  font-weight: 700; color: var(--fg); text-decoration: none;
+  padding: 15px 26px; border-radius: 8px;
+  background: var(--bg2); border: 1px solid var(--border);
+  transition: border-color .15s, transform .15s, box-shadow .15s; }
+.repo:hover { border-color: var(--accent); transform: translateY(-1px);
+  box-shadow: 0 10px 24px -14px #000; }
+.repo svg { width: 24px; height: 24px; fill: currentColor; flex: none; }
+.repo .slash { color: var(--fg-dim); font-weight: 400; }
+
+/* ── code blocks ──────────────────────────────────────── */
+.cmdwrap { position: relative; margin: 12px 0 0; }
+.cmd { padding: 13px 74px 13px 15px; background: var(--bg2);
+  border: 1px solid var(--border); border-radius: 5px;
+  font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre; }
+.cmd .p { color: var(--add); user-select: none; }
+.cmd .c { color: var(--fg-dim); }
+.copy { position: absolute; top: 8px; right: 8px; z-index: 1;
+  font: inherit; font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--fg-dim); background: var(--bg); cursor: pointer;
+  border: 1px solid var(--border); border-radius: 4px; padding: 4px 9px;
+  transition: color .15s, border-color .15s; }
+.copy:hover { color: var(--fg); border-color: var(--accent); }
+.copy.done { color: var(--add); border-color: var(--add); }
+
+/* ── sections ─────────────────────────────────────────── */
+section { padding-top: 62px; }
+h2 { margin: 0 0 10px; font-size: 13px; color: var(--fg);
+  text-transform: uppercase; letter-spacing: .14em; }
+h2::before { content: "▸ "; color: var(--fg-dim); }
+section p { max-width: 92ch; }
+section:last-of-type { padding-bottom: 0; }
+
+/* ── get started: one tab per OS, the visitor's own picked for them ── */
+.tabs { display: flex; gap: 6px; margin: 22px 0 0; flex-wrap: wrap; }
+.tab { display: inline-flex; align-items: center; gap: 9px;
+  font: inherit; font-size: 12.5px; font-weight: 700; letter-spacing: .04em;
+  color: var(--fg-dim); background: transparent; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 7px; padding: 9px 16px;
+  transition: color .15s, border-color .15s, background .15s; }
+.tab svg { width: 16px; height: 16px; fill: currentColor; flex: none; }
+.tab:hover { color: var(--fg); border-color: var(--accent); }
+.tab[aria-selected="true"] { color: var(--fg); background: var(--bg2);
+  border-color: var(--accent); }
+.pane[hidden] { display: none; }
+.pane .note { display: block; margin: 12px 0 0; font-size: 12px;
+  color: var(--fg-dim); }
+.alt { margin-top: 34px; padding-top: 22px; border-top: 1px solid var(--border); }
+.alt h3 { margin: 0 0 4px; font-size: 12.5px; font-weight: 700; color: var(--fg);
+  letter-spacing: .06em; }
+.alt h3 .note { color: var(--fg-dim); font-weight: 400; letter-spacing: 0; }
+.req { margin: 22px 0 0; font-size: 12.5px; color: var(--fg-dim); }
+
+/* ── keys ─────────────────────────────────────────────── */
+.keys { margin: 18px 0 0; width: 100%; border-collapse: collapse;
+  font-size: 12.5px; }
+.keys td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--border);
+  vertical-align: top; }
+.keys tr:last-child td { border-bottom: 0; }
+.keys td:first-child { width: 116px; white-space: nowrap; }
+kbd { display: inline-block; padding: 0 5px; border: 1px solid var(--border);
+  border-bottom-width: 2px; border-radius: 3px; background: var(--bg2);
+  color: var(--fg); font: inherit; font-size: 11.5px; }
+
+figure { margin: 22px 0 0; }
+figure img { display: block; width: 100%; height: auto;
+  border: 1px solid var(--border); border-radius: 5px; }
+.shot { margin-top: 34px; }
+.shot img { box-shadow: 0 18px 44px -22px #000; }
+
+/* Six full-size sidebars dealt like a hand of cards: each one overlaps the
+   last, so only its left edge shows. Hovering lifts a card over its
+   neighbours — the whole theme, uncropped, without moving anything else. */
+.themes { display: flex; margin-top: 22px; padding-bottom: 4px; }
+.themes figure { position: relative; margin: 0 0 0 -180px; flex: none;
+  width: 286px; transition: transform .2s ease; }
+.themes figure:first-child { margin-left: 0; }
+.themes img { border-radius: 6px 6px 0 0; border-bottom: 0;
+  box-shadow: -12px 0 26px -12px #000; }
+.themes figure:hover { z-index: 2; transform: translateY(-6px); }
+.themes figcaption { padding: 7px 10px; font-size: 11px; color: var(--fg-dim);
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: 0 0 6px 6px; }
+
+footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--fg-dim);
+  display: flex; flex-wrap: wrap; gap: 6px 18px; }
+
+@media (max-width: 620px) {
+  main { padding: 0 20px 72px; }
+  header { padding-top: 60px; }
+  h1 { font-size: 27px; }
+  /* no room to fan them out — one card per row */
+  .themes { flex-direction: column; gap: 16px; }
+  .themes figure { width: 100%; margin: 0; }
+  .themes figure:hover { transform: none; }
+  .themes img { box-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+<noscript><style>
+  /* Tabs need JS to switch; without it, drop the tab strip and show every pane. */
+  .tabs { display: none; }
+  .pane[hidden] { display: block; margin-top: 22px; }
+  .pane[hidden]::before { content: attr(data-os); display: block;
+    font-size: 12.5px; font-weight: 700; letter-spacing: .06em;
+    text-transform: capitalize; }
+</style></noscript>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>seendiff</h1>
+  <p class="tagline">A local, point-in-time diff reviewer for large diffs.</p>
+  <p class="sub">View large diffs, while keeping track of what is seen and reviewed.</p>
+
+  <p class="stack">Built on: <strong>Python · HTML · CSS</strong></p>
+
+  <a class="repo" href="https://github.com/currents-abhishek/seendiff">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+    <span>currents-abhishek<span class="slash">/</span>seendiff</span></a>
+
+  <figure class="shot">
+    <img src="img/app.png" width="1274" height="721"
+         alt="seendiff: file sidebar with per-file progress on the left, a syntax-highlighted file with line numbers and a search bar on the right, minimap at the far right">
+  </figure>
+</header>
+
+<section id="get-started">
+  <h2>Get started</h2>
+  <p>One command, then run <code>seendiff</code> inside any git repo. It picks a free port,
+    starts a localhost server and opens your browser. <kbd>Ctrl</kbd><kbd>C</kbd> to stop.</p>
+
+  <div class="tabs" role="tablist" aria-label="Operating system">
+    <button class="tab" type="button" role="tab" data-os="mac" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.05 12.53c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.71-3.19-1.73-1.36-.14-2.65.8-3.34.8-.69 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.18-1.54 2.67-.39 6.62 1.11 8.79.73 1.06 1.6 2.25 2.74 2.21 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.7.71 2.86.69 1.18-.02 1.93-1.08 2.65-2.14.84-1.23 1.18-2.42 1.2-2.48-.03-.01-2.3-.88-2.32-3.5zM14.88 5.9c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.55 1.31-.56.65-1.05 1.68-.92 2.67.97.08 1.96-.49 2.57-1.22z"/></svg>
+      macOS</button>
+    <button class="tab" type="button" role="tab" data-os="linux" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.6c-2.26 0-4.02 1.82-4.02 4.1 0 .93-.18 1.6-.66 2.4C6.03 10.3 5.4 12.3 5.4 14.2c0 1.4-.5 2.5-1.16 3.55-.6.94-.19 1.93.88 2.03.9.08 1.7-.2 2.3-.7.34.9 1.52 1.6 3 1.72.4.03.76.03 1.16 0 1.48-.12 2.66-.82 3-1.72.6.5 1.4.78 2.3.7 1.07-.1 1.48-1.09.88-2.03-.66-1.05-1.16-2.15-1.16-3.55 0-1.9-.63-3.9-1.92-6.1-.48-.8-.66-1.47-.66-2.4 0-2.28-1.76-4.1-4.02-4.1zm-1.5 3.3c.5 0 .9.5.9 1.12 0 .62-.4 1.12-.9 1.12s-.9-.5-.9-1.12c0-.62.4-1.12.9-1.12zm3 0c.5 0 .9.5.9 1.12 0 .62-.4 1.12-.9 1.12s-.9-.5-.9-1.12c0-.62.4-1.12.9-1.12zm-1.5 2.9c.86 0 1.72.44 1.72.9 0 .45-.86 1.06-1.72 1.06s-1.72-.6-1.72-1.06c0-.46.86-.9 1.72-.9z"/></svg>
+      Linux</button>
+    <button class="tab" type="button" role="tab" data-os="windows" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.4 10.5 4.35v7.1H3zM11.6 4.2 21 2.9v8.55h-9.4zM3 12.55h7.5v7.1L3 18.6zM11.6 12.55H21V21.1l-9.4-1.3z"/></svg>
+      Windows</button>
+  </div>
+
+  <div class="pane" data-os="mac" role="tabpanel" hidden>
+    <div class="cmdwrap">
+      <div class="cmd"><span class="c"># uv brings its own Python</span>
+<span class="p">$</span> curl -LsSf https://astral.sh/uv/install.sh | sh
+<span class="p">$</span> uv tool install git+https://github.com/currents-abhishek/seendiff</div>
+      <button class="copy" type="button">copy</button>
+    </div>
+  </div>
+
+  <div class="pane" data-os="linux" role="tabpanel" hidden>
+    <div class="cmdwrap">
+      <div class="cmd"><span class="p">$</span> sudo apt install -y git curl
+<span class="p">$</span> curl -LsSf https://astral.sh/uv/install.sh | sh
+<span class="p">$</span> uv tool install git+https://github.com/currents-abhishek/seendiff</div>
+      <button class="copy" type="button">copy</button>
+    </div>
+    <span class="note">Ubuntu / Debian — swap <code>apt</code> for your package manager.</span>
+  </div>
+
+  <div class="pane" data-os="windows" role="tabpanel" hidden>
+    <div class="cmdwrap">
+      <div class="cmd"><span class="p">&gt;</span> winget install Git.Git
+<span class="p">&gt;</span> irm https://astral.sh/uv/install.ps1 | iex
+<span class="p">&gt;</span> uv tool install git+https://github.com/currents-abhishek/seendiff</div>
+      <button class="copy" type="button">copy</button>
+    </div>
+    <span class="note">PowerShell — untested.</span>
+  </div>
+
+  <p class="req">Needs <strong>Python ≥ 3.10</strong> and <strong>git</strong>. Nothing to
+    configure — no config file, no daemon, no server left running.</p>
+
+  <div class="alt">
+    <h3>Alternate options <span class="note">— pipx, or a clone</span></h3>
+    <div class="cmdwrap">
+      <div class="cmd"><span class="p">$</span> pipx install git+https://github.com/currents-abhishek/seendiff</div>
+      <button class="copy" type="button">copy</button>
+    </div>
+    <div class="cmdwrap">
+      <div class="cmd"><span class="p">$</span> git clone https://github.com/currents-abhishek/seendiff
+<span class="p">$</span> cd seendiff &amp;&amp; python3 -m venv .venv
+<span class="p">$</span> .venv/bin/pip install -e .
+<span class="p">$</span> ln -s "$PWD/.venv/bin/seendiff" ~/.local/bin/seendiff</div>
+      <button class="copy" type="button">copy</button>
+    </div>
+  </div>
+
+  <div class="cmdwrap">
+    <div class="cmd"><span class="p">$</span> cd ~/some/repo &amp;&amp; seendiff
+<span class="p">$</span> seendiff origin/main    <span class="c"># ...or any branch, tag or SHA as the base</span></div>
+    <button class="copy" type="button">copy</button>
+  </div>
+</section>
+
+<section>
+  <h2>Fast</h2>
+  <p>It opens the moment you type it, and stays that way: a 40,000-line file scrolls as
+    smoothly as an empty one, and search hits every changed file at once. Nothing to wait
+    for, nothing to load, no spinner between you and the code.</p>
+</section>
+
+<section>
+  <h2>Secure</h2>
+  <p>Your code never leaves the machine. It listens on localhost only, and no other tab —
+    or site — can reach into your source tree. No accounts, no telemetry, no network calls;
+    it touches the network only when you ask it to fetch.</p>
+</section>
+
+<section>
+  <h2>Easy</h2>
+  <p>One command to install, and nothing to configure: no config file, no daemon, no server
+    left running when you close it. Four dependencies, so it installs in seconds and doesn't
+    rot. Your review progress survives a rebase, an amend, and closing the window — come
+    back tomorrow and pick up where you stopped.</p>
+</section>
+
+<section>
+  <h2>Beautiful</h2>
+  <p>Six themes, each with a matching syntax palette, so colours change with the chrome
+    instead of staying bolted to one scheme. Hover a card to bring it forward.</p>
+  <div class="themes">
+    <figure><img src="img/theme-solarized-dark.png" width="325" height="709" loading="lazy"
+      alt="seendiff sidebar, solarized dark theme"><figcaption>solarized-dark</figcaption></figure>
+    <figure><img src="img/theme-hailmary.png" width="325" height="709" loading="lazy"
+      alt="seendiff sidebar, hailmary theme"><figcaption>hailmary</figcaption></figure>
+    <figure><img src="img/theme-light.png" width="325" height="709" loading="lazy"
+      alt="seendiff sidebar, light theme"><figcaption>light</figcaption></figure>
+    <figure><img src="img/theme-dark.png" width="325" height="709" loading="lazy"
+      alt="seendiff sidebar, dark theme"><figcaption>dark</figcaption></figure>
+    <figure><img src="img/theme-solarized-light.png" width="325" height="709" loading="lazy"
+      alt="seendiff sidebar, solarized light theme"><figcaption>solarized-light</figcaption></figure>
+    <figure><img src="img/theme-space.png" width="325" height="709" loading="lazy"
+      alt="seendiff sidebar, space theme"><figcaption>space</figcaption></figure>
+  </div>
+</section>
+
+<section>
+  <h2>LLM first</h2>
+  <p>A big change is easy to lose your place in. seendiff marks a block <em>seen</em> the
+    moment it scrolls through the viewport, and <em>reviewed</em> only
+    when you say so — so the bar tells you the difference between what passed your eyes
+    and what passed your judgement.</p>
+  <p>When you want a second opinion, <kbd>y</kbd> copies an exact <code>path:line</code>
+    reference with its content, ready to paste into a prompt. <kbd>Y</kbd> copies refs for
+    everything still unreviewed in the file.</p>
+</section>
+
+<section>
+  <h2>Keyboard shortcuts</h2>
+  <table class="keys">
+    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>prev / next change block in this file</td></tr>
+    <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>prev / next file</td></tr>
+    <tr><td><kbd>R</kbd></td><td>mark block reviewed, advance (toggles off if reviewed)</td></tr>
+    <tr><td><kbd>n</kbd> <kbd>N</kbd></td><td>next / prev unreviewed block, crosses files</td></tr>
+    <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>scroll lines</td></tr>
+    <tr><td><kbd>d</kbd> <kbd>u</kbd></td><td>scroll half page</td></tr>
+    <tr><td><kbd>V</kbd></td><td>mark all seen-but-unreviewed blocks in file reviewed</td></tr>
+    <tr><td><kbd>f</kbd></td><td>mark whole file reviewed, next file</td></tr>
+    <tr><td><kbd>y</kbd></td><td>copy ref + content (selection or focused block)</td></tr>
+    <tr><td><kbd>Y</kbd></td><td>copy refs for all unreviewed blocks in file</td></tr>
+    <tr><td><kbd>s</kbd></td><td>toggle side-by-side / unified</td></tr>
+    <tr><td><kbd>Ctrl</kbd><kbd>F</kbd></td><td>search all changed files — <kbd>⏎</kbd> / <kbd>⇧⏎</kbd> next / prev · <kbd>Esc</kbd> closes</td></tr>
+    <tr><td><kbd>g</kbd></td><td>focus file filter</td></tr>
+    <tr><td><kbd>h</kbd></td><td>hide fully-reviewed files</td></tr>
+    <tr><td><kbd>t</kbd></td><td>cycle theme</td></tr>
+    <tr><td><kbd>X</kbd></td><td>reset all seen / reviewed state (asks first)</td></tr>
+    <tr><td><kbd>?</kbd></td><td>help &nbsp;·&nbsp; <kbd>Esc</kbd> closes</td></tr>
+  </table>
+</section>
+
+<section id="walkthroughs">
+  <h2>Optional skill: Code walkthroughs</h2>
+  <p><strong>AI + Human &gt; AI or Human.</strong> Lets the LLM guide you through a large
+    change. A diff shows what changed. It never tells you what to read first. So the agent
+    that wrote the change can also script an explanation of it, and seendiff plays it back
+    step by step — the pane jumps to the lines each step is about, and steps are grouped
+    into acts, so a big change reads as a few chapters instead of eighty bullet points.
+    Press <kbd>.</kbd> to fold the detail away and read the spine alone. It explains; you
+    judge.</p>
+
+  <div class="cmdwrap">
+    <div class="cmd"><span class="p">$</span> seendiff --walkthrough .git/seendiff-walkthrough.json
+<span class="p">$</span> seendiff --check-walkthrough script.json   <span class="c"># validate, exit 0/1</span></div>
+    <button class="copy" type="button">copy</button>
+  </div>
+
+  <p>The file can start empty. seendiff opens as a plain diff reviewer and watches it, so
+    the agent can write the script while you read — every open tab picks it up in a couple
+    of seconds. No relaunch, no new tab. Every line reference is checked against the real
+    diff first, so a script pointing at a line that doesn't exist fails at load instead of
+    scrolling you somewhere wrong.</p>
+
+  <p>To let Claude open diffs and write walkthroughs in any repo, symlink the bundled
+    skill once:</p>
+
+  <div class="cmdwrap">
+    <div class="cmd"><span class="p">$</span> ln -s "$PWD/skills/code-diff" ~/.claude/skills/code-diff</div>
+    <button class="copy" type="button">copy</button>
+  </div>
+</section>
+
+<footer>
+  <a href="https://github.com/currents-abhishek/seendiff">github.com/currents-abhishek/seendiff</a>
+  <span>MIT</span>
+  <span>Python ≥ 3.10</span>
+</footer>
+
+</main>
+
+<script>
+// Show the visitor their own platform first — the other tabs are still one click
+// away, and with JS off every pane stays hidden, so the <noscript> fallback below
+// is what they get.
+(() => {
+  const tabs = [...document.querySelectorAll(".tab")];
+  const panes = [...document.querySelectorAll(".pane")];
+  const ua = navigator.userAgent;
+  const plat = (navigator.userAgentData && navigator.userAgentData.platform) || ua;
+  const os = /Win/i.test(plat) ? "windows"
+           : /Mac|iPhone|iPad|iPod/i.test(plat) ? "mac"
+           : /Linux|Android|CrOS|X11/i.test(plat) ? "linux"
+           : "mac";
+  const select = want => {
+    tabs.forEach(t => t.setAttribute("aria-selected", String(t.dataset.os === want)));
+    panes.forEach(p => { p.hidden = p.dataset.os !== want; });
+  };
+  tabs.forEach(t => t.addEventListener("click", () => select(t.dataset.os)));
+  select(os);
+})();
+
+// Copy the commands, not the shell furniture: the prompt markers and comments
+// are presentation, so they're stripped from what lands on the clipboard.
+document.querySelectorAll(".cmdwrap").forEach(wrap => {
+  const btn = wrap.querySelector(".copy");
+  const cmd = wrap.querySelector(".cmd");
+  btn.addEventListener("click", async () => {
+    const clone = cmd.cloneNode(true);
+    clone.querySelectorAll(".p, .c").forEach(n => n.remove());
+    const text = clone.textContent.split("\n")
+      .map(l => l.trim()).filter(Boolean).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = "copied";
+      btn.classList.add("done");
+    } catch (e) {
+      btn.textContent = "select it";   // no clipboard access over plain http
+    }
+    setTimeout(() => { btn.textContent = "copy"; btn.classList.remove("done"); }, 1500);
+  });
+});
+</script>
+</body>
+</html>
