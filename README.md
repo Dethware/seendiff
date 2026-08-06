@@ -7,6 +7,22 @@ View large diffs, while keeping track of what is seen and reviewed.
 
 ![MIT](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue) ![No build step](https://img.shields.io/badge/build%20step-none-green)
 
+<br>
+
+<div align="center">
+
+# → [acme-dot-bot.github.io/seendiff](https://acme-dot-bot.github.io/seendiff/) ←
+
+### Screenshots, themes, and everything below — on one page.
+
+<br>
+
+[![Open the site](https://img.shields.io/badge/open_the_site-acme--dot--bot.github.io%2Fseendiff-9aa4ae?style=for-the-badge&labelColor=111113)](https://acme-dot-bot.github.io/seendiff/)
+
+</div>
+
+<br>
+
 ![seendiff](docs/img/app.png)
 
 Your branch's full diff against `origin/master`, every changed file shown **whole**
