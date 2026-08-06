@@ -6,7 +6,7 @@ Design doc. Nothing here is implemented yet.
 
 Two halves that only make sense together:
 
-1. **A skill** (`code-diff`) that turns "explain this code" / "explain this
+1. **A skill** (`seendiff`) that turns "explain this code" / "explain this
    change" into a *scripted* walkthrough — an ordered list of code references with
    layered prose — written to a JSON file.
 2. **A seendiff mode** that plays that file back: a bottom bar under the code pane
@@ -308,7 +308,7 @@ when the agent rewrites it.
 
 ## 4. The skill
 
-Lives at `skills/code-diff/SKILL.md` in this repo, symlinked into
+Lives at `skills/seendiff/SKILL.md` in this repo, symlinked into
 `~/.claude/skills/` — it's used from *other* repos, so a project-level skill
 here would never fire where it's needed. README gets the one-line install.
 

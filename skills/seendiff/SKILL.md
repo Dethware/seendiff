@@ -1,5 +1,5 @@
 ---
-name: code-diff
+name: seendiff
 description: >
   Show code in seendiff — a local diff reviewer that can also play a scripted,
   step-by-step explanation. Use after making a commit (offer to show the diff),
@@ -8,7 +8,7 @@ description: >
   git repository.
 ---
 
-# code-diff
+# seendiff
 
 Two jobs, one server:
 
@@ -19,6 +19,39 @@ Two jobs, one server:
 The server is launched *once per conversation*, always with an empty
 walkthrough, so it starts as a plain diff reviewer and becomes a walkthrough
 the moment you have something to explain.
+
+## What must be installed
+
+Two things, and the machine is set up once — not per repo, not per
+conversation. Pick whatever installation method suits the machine; what
+matters is that the end state below holds.
+
+**1. The `seendiff` CLI.** A Python CLI (Python ≥ 3.10, plus `git`) from
+`https://github.com/acme-dot-bot/seendiff`.
+
+End state:
+
+- `command -v seendiff` resolves from *any* directory, in a fresh shell, with
+  no virtualenv activated and no path prefix typed.
+- `seendiff --help` and `seendiff --check-walkthrough <file>` both run.
+- It stays working after this repo's checkout is moved or deleted — no
+  dependency on being run from inside the source tree.
+
+**2. This skill.** The `seendiff` skill itself, installed for the user rather
+than vendored into one project.
+
+End state:
+
+- The skill is available in every conversation, in any git repo, without
+  copying files into that repo.
+- `/seendiff` (or a natural request like "show me the diff") triggers it from
+  anywhere, and it names the version installed here.
+- Updating the copy in this repo does not silently change the installed
+  skill — reinstalling is a deliberate step.
+
+If either is missing you cannot do this skill's job: say so plainly, state
+which of the two is absent, and give prose instead of writing a file nobody
+can open.
 
 ## The one instance rule
 
@@ -55,10 +88,9 @@ curl -sf -o /dev/null "http://127.0.0.1:$PORT/" && echo ALREADY-RUNNING
   It opens the user's browser itself. If it exits immediately because the port
   is taken by something else, pick a new random port, rewrite
   `.git/seendiff-port`, and relaunch.
-- If `seendiff` is missing, install it once — it's a Python CLI:
-  `uv tool install git+https://github.com/currents-abhishek/seendiff` (or
-  `pipx install git+https://github.com/currents-abhishek/seendiff`). If neither
-  tool exists, say so and give prose instead of writing a file nobody can open.
+- If `command -v seendiff` prints `MISSING`, stop — see *What must be
+  installed* above. Don't work around it with a path into some checkout's
+  virtualenv; the prerequisite is a `seendiff` that runs from anywhere.
 
 **Always pass `--walkthrough` with the empty file**, even when you have nothing
 to explain. An empty walkthrough (`{}`) is a supported state: seendiff opens in

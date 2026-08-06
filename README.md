@@ -25,7 +25,7 @@ Not a merge tool: no editing, no conflict resolution, no comments. It's a reader
 Requires Python ≥ 3.10 and `git`.
 
 ```bash
-git clone git@github.com:currents-abhishek/seendiff.git
+git clone git@github.com:acme-dot-bot/seendiff.git
 cd seendiff
 python3 -m venv .venv
 .venv/bin/pip install -e .
@@ -46,7 +46,7 @@ ln -s /path/to/seendiff/.venv/bin/seendiff ~/.local/bin/seendiff
 Or skip the clone entirely with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv tool install git+https://github.com/currents-abhishek/seendiff
+uv tool install git+https://github.com/acme-dot-bot/seendiff
 ```
 
 There is nothing to configure. No config file, no daemon, no server to keep running.
@@ -124,7 +124,7 @@ To let Claude show diffs and write walkthroughs for any repo, symlink the skill
 once:
 
 ```bash
-ln -s "$(pwd)/skills/code-diff" ~/.claude/skills/code-diff
+ln -s "$(pwd)/skills/seendiff" ~/.claude/skills/seendiff
 ```
 
 ### Keys

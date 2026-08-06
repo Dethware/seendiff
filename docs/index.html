@@ -59,6 +59,8 @@ h1 { margin: 0; font-size: 36px; }
 .cmd { padding: 13px 74px 13px 15px; background: var(--bg2);
   border: 1px solid var(--border); border-radius: 5px;
   font-size: 13px; line-height: 1.8; overflow-x: auto; white-space: pre; }
+/* A prompt for an agent, not a shell line: it wraps, and copies verbatim. */
+.cmd.prose { white-space: pre-wrap; padding-right: 15px; padding-top: 34px; }
 .cmd .p { color: var(--add); user-select: none; }
 .cmd .c { color: var(--fg-dim); }
 .copy { position: absolute; top: 8px; right: 8px; z-index: 1;
@@ -70,10 +72,17 @@ h1 { margin: 0; font-size: 36px; }
 .copy.done { color: var(--add); border-color: var(--add); }
 
 /* ── sections ─────────────────────────────────────────── */
-section { padding-top: 62px; }
-h2 { margin: 0 0 10px; font-size: 13px; color: var(--fg);
-  text-transform: uppercase; letter-spacing: .14em; }
-h2::before { content: "▸ "; color: var(--fg-dim); }
+section { padding-top: 104px; }
+/* Below the fold the page is short blocks of copy, so they get room to breathe:
+   a wider gap between sections, and looser prose inside them. */
+#run-it ~ section { padding-top: 136px; }
+#run-it ~ section p { margin-bottom: 20px; line-height: 1.85; }
+/* Headings carry the page's structure, so they sit brighter and larger than the
+   prose under them, and the marker takes the accent green. */
+h2 { margin: 0 0 26px; font-size: 21px; letter-spacing: .08em;
+  color: color-mix(in srgb, var(--fg) 65%, #fff);
+  text-transform: uppercase; }
+h2::before { content: "▸ "; color: var(--add); }
 section p { max-width: 92ch; }
 section:last-of-type { padding-bottom: 0; }
 
@@ -91,16 +100,14 @@ section:last-of-type { padding-bottom: 0; }
 .pane[hidden] { display: none; }
 .pane .note { display: block; margin: 12px 0 0; font-size: 12px;
   color: var(--fg-dim); }
-.alt { margin-top: 34px; padding-top: 22px; border-top: 1px solid var(--border); }
-.alt h3 { margin: 0 0 4px; font-size: 12.5px; font-weight: 700; color: var(--fg);
-  letter-spacing: .06em; }
-.alt h3 .note { color: var(--fg-dim); font-weight: 400; letter-spacing: 0; }
 .req { margin: 22px 0 0; font-size: 12.5px; color: var(--fg-dim); }
+/* The walkthrough pitch reads as separate beats, so each line stands alone. */
+.lead { font-size: 17px; }
 
 /* ── keys ─────────────────────────────────────────────── */
 .keys { margin: 18px 0 0; width: 100%; border-collapse: collapse;
   font-size: 12.5px; }
-.keys td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--border);
+.keys td { padding: 9px 10px 9px 0; border-bottom: 1px solid var(--border);
   vertical-align: top; }
 .keys tr:last-child td { border-bottom: 0; }
 .keys td:first-child { width: 116px; white-space: nowrap; }
@@ -108,7 +115,27 @@ kbd { display: inline-block; padding: 0 5px; border: 1px solid var(--border);
   border-bottom-width: 2px; border-radius: 3px; background: var(--bg2);
   color: var(--fg); font: inherit; font-size: 11.5px; }
 
-figure { margin: 22px 0 0; }
+/* The per-file bar, rebuilt here so the legend can point at the real thing:
+   solid fill is reviewed, the washed-out fill is merely seen. Same geometry as
+   the app's .f-bar, minus the notches. */
+.bardemo { display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  margin: 24px 0 0; }
+.dbar { display: flex; width: 100%; max-width: 460px; height: 12px;
+  border-radius: 3px; background: color-mix(in srgb, var(--fg) 14%, transparent); }
+.dbar span { height: 100%; border-radius: 3px; }
+.dbar .rev { background: var(--add);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--add) 75%, transparent)); }
+.dbar .seen { background: color-mix(in srgb, var(--add) 40%, transparent); }
+.legend { margin: 18px 0 0; padding: 0; list-style: none; font-size: 12.5px; }
+.legend li { display: flex; gap: 12px; margin-bottom: 8px; }
+.legend .sw { flex: none; width: 26px; height: 12px; border-radius: 3px;
+  margin-top: 4px; }
+.legend .sw.rev { background: var(--add);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--add) 75%, transparent)); }
+.legend .sw.seen { background: color-mix(in srgb, var(--add) 40%, transparent); }
+.legend strong { font-weight: 700; }
+
+figure { margin: 30px 0 0; }
 figure img { display: block; width: 100%; height: auto;
   border: 1px solid var(--border); border-radius: 5px; }
 .shot { margin-top: 34px; }
@@ -134,6 +161,7 @@ footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border
 
 @media (max-width: 620px) {
   main { padding: 0 20px 72px; }
+  #run-it ~ section { padding-top: 92px; }
   header { padding-top: 60px; }
   h1 { font-size: 27px; }
   /* no room to fan them out — one card per row */
@@ -162,25 +190,39 @@ footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border
   <h1>seendiff</h1>
   <p class="tagline">A local, point-in-time diff reviewer for large diffs.</p>
   <p class="sub">View large diffs, while keeping track of what is seen and reviewed.</p>
+  <p class="sub"><strong>Coding agent optimized.</strong></p>
 
   <p class="stack">Built on: <strong>Python · HTML · CSS</strong></p>
 
-  <a class="repo" href="https://github.com/currents-abhishek/seendiff">
+  <a class="repo" href="https://github.com/acme-dot-bot/seendiff">
     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-    <span>currents-abhishek<span class="slash">/</span>seendiff</span></a>
+    <span>acme-dot-bot<span class="slash">/</span>seendiff</span></a>
 
   <figure class="shot">
-    <img src="img/app.png" width="1274" height="721"
-         alt="seendiff: file sidebar with per-file progress on the left, a syntax-highlighted file with line numbers and a search bar on the right, minimap at the far right">
+    <img src="img/app.png" width="1368" height="825"
+         alt="seendiff: the sidebar tracks 6 of 44 blocks reviewed across 17 files with a per-file progress bar, the main pane shows a syntax-highlighted diff with old and new line numbers, search open with 12 of 31 matches, and the minimap at the far right">
   </figure>
 </header>
+
+<section id="seen-vs-reviewed">
+  <div class="bardemo">
+    <div class="dbar"><span class="rev" style="width:34%"></span><span class="seen" style="width:27%"></span></div>
+  </div>
+
+  <ul class="legend">
+    <li><span class="sw seen"></span><span><strong>Seen</strong> — marked automatically when
+      a code block scrolled through your viewport</span></li>
+    <li><span class="sw rev"></span><span><strong>Reviewed</strong> — explicitly marked using
+      <kbd>R</kbd> for the block, <kbd>f</kbd> for the whole file</span></li>
+  </ul>
+</section>
 
 <section id="get-started">
   <h2>Get started</h2>
   <p>One command, then run <code>seendiff</code> inside any git repo. It picks a free port,
     starts a localhost server and opens your browser. <kbd>Ctrl</kbd><kbd>C</kbd> to stop.</p>
 
-  <div class="tabs" role="tablist" aria-label="Operating system">
+  <div class="tabs" role="tablist" aria-label="Install method">
     <button class="tab" type="button" role="tab" data-os="mac" aria-selected="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.05 12.53c-.02-2.2 1.8-3.26 1.88-3.31-1.03-1.5-2.62-1.71-3.19-1.73-1.36-.14-2.65.8-3.34.8-.69 0-1.75-.78-2.88-.76-1.48.02-2.85.86-3.61 2.18-1.54 2.67-.39 6.62 1.11 8.79.73 1.06 1.6 2.25 2.74 2.21 1.1-.04 1.52-.71 2.85-.71 1.33 0 1.7.71 2.86.69 1.18-.02 1.93-1.08 2.65-2.14.84-1.23 1.18-2.42 1.2-2.48-.03-.01-2.3-.88-2.32-3.5zM14.88 5.9c.6-.73 1.01-1.75.9-2.76-.87.04-1.92.58-2.55 1.31-.56.65-1.05 1.68-.92 2.67.97.08 1.96-.49 2.57-1.22z"/></svg>
       macOS</button>
@@ -190,13 +232,24 @@ footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border
     <button class="tab" type="button" role="tab" data-os="windows" aria-selected="false">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.4 10.5 4.35v7.1H3zM11.6 4.2 21 2.9v8.55h-9.4zM3 12.55h7.5v7.1L3 18.6zM11.6 12.55H21V21.1l-9.4-1.3z"/></svg>
       Windows</button>
+    <button class="tab" type="button" role="tab" data-os="pip" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11.9 2c-1.9 0-3.4.3-4.2.8-.6.4-.9 1-.9 1.7v2.1h5.2v.7H4.9c-1 0-1.9.6-2.3 1.6-.5 1.2-.5 2.4-.5 3.6 0 1.2 0 2.4.5 3.6.4 1 1.3 1.6 2.3 1.6h1.5v-2.5c0-1.2 1-2.2 2.2-2.2h5.2c1 0 1.9-.8 1.9-1.8V4.5c0-.7-.4-1.3-1-1.7-.8-.5-2.4-.8-4.8-.8zM9.2 3.6c.5 0 .9.4.9.9s-.4.9-.9.9-.9-.4-.9-.9.4-.9.9-.9zM17.6 6.7v2.4c0 1.3-1.1 2.3-2.3 2.3H10c-1 0-1.9.8-1.9 1.8v4.3c0 .7.5 1.2 1.1 1.5.9.4 2.1.6 3.4.6 1.3 0 2.3-.2 3.2-.6.7-.3 1.2-.8 1.2-1.5v-2.1h-5.2v-.7h6.9c1 0 1.7-.6 2.1-1.6.4-1 .6-2 .6-3.6 0-1.6-.7-2.8-2.1-2.8h-1.7zm-2.8 11.3c.5 0 .9.4.9.9s-.4.9-.9.9-.9-.4-.9-.9.4-.9.9-.9z"/></svg>
+      pip</button>
+    <button class="tab" type="button" role="tab" data-os="agent" aria-selected="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.4l1.9 5.1 5.1 1.9-5.1 1.9L12 16.4l-1.9-5.1L5 9.4l5.1-1.9zM19 15l.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9zM4.6 13.6l.7 1.9 1.9.7-1.9.7-.7 1.9-.7-1.9-1.9-.7 1.9-.7z"/></svg>
+      Coding agent</button>
   </div>
 
   <div class="pane" data-os="mac" role="tabpanel" hidden>
     <div class="cmdwrap">
       <div class="cmd"><span class="c"># uv brings its own Python</span>
 <span class="p">$</span> curl -LsSf https://astral.sh/uv/install.sh | sh
-<span class="p">$</span> uv tool install git+https://github.com/currents-abhishek/seendiff</div>
+<span class="p">$</span> uv tool install git+https://github.com/acme-dot-bot/seendiff</div>
+      <button class="copy" type="button">copy</button>
+    </div>
+    <div class="cmdwrap">
+      <div class="cmd"><span class="c"># cd into a repo with commits not yet merged into master</span>
+<span class="p">$</span> cd ~/some/repo &amp;&amp; seendiff</div>
       <button class="copy" type="button">copy</button>
     </div>
   </div>
@@ -205,7 +258,12 @@ footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border
     <div class="cmdwrap">
       <div class="cmd"><span class="p">$</span> sudo apt install -y git curl
 <span class="p">$</span> curl -LsSf https://astral.sh/uv/install.sh | sh
-<span class="p">$</span> uv tool install git+https://github.com/currents-abhishek/seendiff</div>
+<span class="p">$</span> uv tool install git+https://github.com/acme-dot-bot/seendiff</div>
+      <button class="copy" type="button">copy</button>
+    </div>
+    <div class="cmdwrap">
+      <div class="cmd"><span class="c"># cd into a repo with commits not yet merged into master</span>
+<span class="p">$</span> cd ~/some/repo &amp;&amp; seendiff</div>
       <button class="copy" type="button">copy</button>
     </div>
     <span class="note">Ubuntu / Debian — swap <code>apt</code> for your package manager.</span>
@@ -215,57 +273,88 @@ footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border
     <div class="cmdwrap">
       <div class="cmd"><span class="p">&gt;</span> winget install Git.Git
 <span class="p">&gt;</span> irm https://astral.sh/uv/install.ps1 | iex
-<span class="p">&gt;</span> uv tool install git+https://github.com/currents-abhishek/seendiff</div>
+<span class="p">&gt;</span> uv tool install git+https://github.com/acme-dot-bot/seendiff</div>
+      <button class="copy" type="button">copy</button>
+    </div>
+    <div class="cmdwrap">
+      <div class="cmd"><span class="c"># cd into a repo with commits not yet merged into master</span>
+<span class="p">&gt;</span> cd C:\repos\myproject; seendiff</div>
       <button class="copy" type="button">copy</button>
     </div>
     <span class="note">PowerShell — untested.</span>
   </div>
 
-  <p class="req">Needs <strong>Python ≥ 3.10</strong> and <strong>git</strong>. Nothing to
-    configure — no config file, no daemon, no server left running.</p>
-
-  <div class="alt">
-    <h3>Alternate options <span class="note">— pipx, or a clone</span></h3>
+  <div class="pane" data-os="pip" role="tabpanel" hidden>
     <div class="cmdwrap">
-      <div class="cmd"><span class="p">$</span> pipx install git+https://github.com/currents-abhishek/seendiff</div>
+      <div class="cmd"><span class="c"># your own Python, in a venv you keep</span>
+<span class="p">$</span> python3 -m venv ~/.venvs/seendiff
+<span class="p">$</span> ~/.venvs/seendiff/bin/pip install git+https://github.com/acme-dot-bot/seendiff
+<span class="p">$</span> ln -s ~/.venvs/seendiff/bin/seendiff ~/.local/bin/seendiff</div>
       <button class="copy" type="button">copy</button>
     </div>
     <div class="cmdwrap">
-      <div class="cmd"><span class="p">$</span> git clone https://github.com/currents-abhishek/seendiff
-<span class="p">$</span> cd seendiff &amp;&amp; python3 -m venv .venv
-<span class="p">$</span> .venv/bin/pip install -e .
-<span class="p">$</span> ln -s "$PWD/.venv/bin/seendiff" ~/.local/bin/seendiff</div>
+      <div class="cmd"><span class="c"># cd into a repo with commits not yet merged into master</span>
+<span class="p">$</span> cd ~/some/repo &amp;&amp; seendiff</div>
       <button class="copy" type="button">copy</button>
     </div>
+    <span class="note">The symlink is what puts it on your <code>PATH</code> — without it, run
+      <code>~/.venvs/seendiff/bin/seendiff</code>. <code>pip install --user</code> works too
+      if your Python allows it.</span>
   </div>
 
+  <div class="pane" data-os="agent" role="tabpanel" hidden>
+    <div class="cmdwrap">
+      <div class="cmd prose">Install seendiff for me: https://github.com/acme-dot-bot/seendiff
+— a Python CLI, needs Python 3.10+ and git.
+
+When you're done: `seendiff` runs from any directory in a fresh shell, with no
+virtualenv activated and no path prefix, and it keeps working if the checkout
+is moved or deleted.
+
+Also install the bundled `skills/seendiff` skill for me, so you can open diffs
+and script walkthroughs in any repo without copying it in.
+
+Pick whichever install method suits this machine, and tell me what you chose.</div>
+      <button class="copy" type="button">copy</button>
+    </div>
+    <span class="note">Paste that into Claude Code (or any coding agent with shell access).
+      It installs both halves: the CLI, and the skill that lets the agent open a diff and
+      write the walkthrough you read.</span>
+  </div>
+
+  <p class="req">Needs <strong>Python ≥ 3.10</strong> and <strong>git</strong>.</p>
+</section>
+
+<section id="run-it">
+  <h2>Run it</h2>
+  <p>From inside any git repo:</p>
+
   <div class="cmdwrap">
-    <div class="cmd"><span class="p">$</span> cd ~/some/repo &amp;&amp; seendiff
-<span class="p">$</span> seendiff origin/main    <span class="c"># ...or any branch, tag or SHA as the base</span></div>
+    <div class="cmd"><span class="p">$</span> seendiff                 <span class="c"># HEAD vs origin/master, with fallbacks</span>
+<span class="p">$</span> seendiff main            <span class="c"># ...or any branch, tag or SHA as the base</span>
+<span class="p">$</span> seendiff HEAD~3          <span class="c"># just the last three commits</span>
+<span class="p">$</span> seendiff --port 8700     <span class="c"># a fixed port instead of a free one</span></div>
     <button class="copy" type="button">copy</button>
   </div>
 </section>
 
 <section>
   <h2>Fast</h2>
-  <p>It opens the moment you type it, and stays that way: a 40,000-line file scrolls as
-    smoothly as an empty one, and search hits every changed file at once. Nothing to wait
-    for, nothing to load, no spinner between you and the code.</p>
+  <p>Designed with scale in mind, for large changes. Thanks to virtualization, a
+    40,000-line file scrolls smoothly.</p>
 </section>
 
 <section>
   <h2>Secure</h2>
-  <p>Your code never leaves the machine. It listens on localhost only, and no other tab —
-    or site — can reach into your source tree. No accounts, no telemetry, no network calls;
-    it touches the network only when you ask it to fetch.</p>
+  <p>Nothing leaves your machine. No accounts, no telemetry, no network calls outside of
+    localhost.</p>
 </section>
 
 <section>
   <h2>Easy</h2>
-  <p>One command to install, and nothing to configure: no config file, no daemon, no server
-    left running when you close it. Four dependencies, so it installs in seconds and doesn't
-    rot. Your review progress survives a rebase, an amend, and closing the window — come
-    back tomorrow and pick up where you stopped.</p>
+  <p>Minimal dependencies (four!). Installs in seconds. Nothing to build. No config file.</p>
+  <p>Your review progress survives a rebase, an amend, and closing the window. Come back
+    tomorrow and pick up where you stopped.</p>
 </section>
 
 <section>
@@ -289,18 +378,18 @@ footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border
 </section>
 
 <section>
-  <h2>LLM first</h2>
-  <p>A big change is easy to lose your place in. seendiff marks a block <em>seen</em> the
-    moment it scrolls through the viewport, and <em>reviewed</em> only
-    when you say so — so the bar tells you the difference between what passed your eyes
-    and what passed your judgement.</p>
-  <p>When you want a second opinion, <kbd>y</kbd> copies an exact <code>path:line</code>
-    reference with its content, ready to paste into a prompt. <kbd>Y</kbd> copies refs for
-    everything still unreviewed in the file.</p>
+  <h2>Details that matter for a reviewer</h2>
+  <p>A minimap runs down the side of the file: one glance tells you what you have seen,
+    what you haven't, and what is still unreviewed.</p>
+  <p>Search covers the file you are in and every other changed file at once.</p>
+  <figure>
+    <img src="img/search.png" width="1100" height="694" loading="lazy"
+         alt="seendiff with search open: the bar reports 31 matches in 6 files, a results panel on the right groups hits by file, and the minimap strip beside the code marks seen and unreviewed regions">
+  </figure>
 </section>
 
 <section>
-  <h2>Keyboard shortcuts</h2>
+  <h2>Fully keyboard driven</h2>
   <table class="keys">
     <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>prev / next change block in this file</td></tr>
     <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>prev / next file</td></tr>
@@ -323,38 +412,46 @@ footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border
 </section>
 
 <section id="walkthroughs">
-  <h2>Optional skill: Code walkthroughs</h2>
-  <p><strong>AI + Human &gt; AI or Human.</strong> Lets the LLM guide you through a large
-    change. A diff shows what changed. It never tells you what to read first. So the agent
-    that wrote the change can also script an explanation of it, and seendiff plays it back
-    step by step — the pane jumps to the lines each step is about, and steps are grouped
-    into acts, so a big change reads as a few chapters instead of eighty bullet points.
-    Press <kbd>.</kbd> to fold the detail away and read the spine alone. It explains; you
-    judge.</p>
+  <h2>Code walkthrough skill</h2>
+
+  <p class="lead"><strong>AI + Human &gt; AI or Human.</strong></p>
+
+  <p>AI is a super-coder, but lacks the awareness and context to make the tradeoffs that
+    drive your design decisions.</p>
+
+  <p>Any sane codebase wants a pair of trained human eyes on it.</p>
+
+  <p>This project was born out of that need.</p>
+
+  <p>To that end, seendiff ships with a walkthrough mode — where a coding agent explains
+    itself, step by step, on the diff.</p>
+
+  <p>Makes it easier to use the coding agent to understand the code it has written.</p>
+
+  <p class="req">Ask your coding agent to install the skill, once:</p>
 
   <div class="cmdwrap">
-    <div class="cmd"><span class="p">$</span> seendiff --walkthrough .git/seendiff-walkthrough.json
-<span class="p">$</span> seendiff --check-walkthrough script.json   <span class="c"># validate, exit 0/1</span></div>
+    <div class="cmd prose">Install the seendiff skill for me, from
+https://github.com/acme-dot-bot/seendiff — so you can open diffs and write
+walkthroughs for me in any repo.</div>
     <button class="copy" type="button">copy</button>
   </div>
 
-  <p>The file can start empty. seendiff opens as a plain diff reviewer and watches it, so
-    the agent can write the script while you read — every open tab picks it up in a couple
-    of seconds. No relaunch, no new tab. Every line reference is checked against the real
-    diff first, so a script pointing at a line that doesn't exist fails at load instead of
-    scrolling you somewhere wrong.</p>
-
-  <p>To let Claude open diffs and write walkthroughs in any repo, symlink the bundled
-    skill once:</p>
+  <p class="req">Then, in any repo, ask for the walkthrough you want:</p>
 
   <div class="cmdwrap">
-    <div class="cmd"><span class="p">$</span> ln -s "$PWD/skills/code-diff" ~/.claude/skills/code-diff</div>
+    <div class="cmd prose">Explain the auth flow in this PR.</div>
     <button class="copy" type="button">copy</button>
   </div>
+
+  <figure>
+    <img src="img/walkthrough.png" width="1230" height="699" loading="lazy"
+         alt="seendiff playing a walkthrough: the sidebar lists acts and their steps with the current one highlighted, the code pane shows the lines that step is about, and a bar under the code holds the step's prose with a line reference and a pointer to a later step">
+  </figure>
 </section>
 
 <footer>
-  <a href="https://github.com/currents-abhishek/seendiff">github.com/currents-abhishek/seendiff</a>
+  <a href="https://github.com/acme-dot-bot/seendiff">github.com/acme-dot-bot/seendiff</a>
   <span>MIT</span>
   <span>Python ≥ 3.10</span>
 </footer>
@@ -390,8 +487,10 @@ document.querySelectorAll(".cmdwrap").forEach(wrap => {
   btn.addEventListener("click", async () => {
     const clone = cmd.cloneNode(true);
     clone.querySelectorAll(".p, .c").forEach(n => n.remove());
-    const text = clone.textContent.split("\n")
-      .map(l => l.trim()).filter(Boolean).join("\n");
+    // A prose prompt copies verbatim — its blank lines are paragraph breaks, not furniture.
+    const text = cmd.classList.contains("prose")
+      ? cmd.textContent.trim()
+      : clone.textContent.split("\n").map(l => l.trim()).filter(Boolean).join("\n");
     try {
       await navigator.clipboard.writeText(text);
       btn.textContent = "copied";
