@@ -11,13 +11,8 @@ View large diffs, while keeping track of what is seen and reviewed.
 
 <div align="center">
 
-# → [acme-dot-bot.github.io/seendiff](https://acme-dot-bot.github.io/seendiff/) ←
+# → [open the docs website](https://acme-dot-bot.github.io/seendiff/) ←
 
-### Screenshots, themes, and everything below — on one page.
-
-<br>
-
-[![Open the site](https://img.shields.io/badge/open_the_site-acme--dot--bot.github.io%2Fseendiff-9aa4ae?style=for-the-badge&labelColor=111113)](https://acme-dot-bot.github.io/seendiff/)
 
 </div>
 
