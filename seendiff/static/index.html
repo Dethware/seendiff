@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>seendiff</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%23111113'/><rect x='2' y='7' width='8' height='3' fill='%23c3d6b3'/></svg>">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script>
   // UI prefs live server-side (see store.get_prefs): every run gets a fresh
@@ -149,7 +150,13 @@ button:hover { border-color: var(--accent); }
   cursor: col-resize; z-index: 5; }
 #sb-resizer:hover, #sb-resizer.active { background: var(--accent); opacity: .5; }
 #sb-head { padding: 10px 12px 8px; border-bottom: 1px solid var(--border); }
+/* "seen" carries the wordmark, "diff" steps back half a tone. Brighter means
+   further from the background, so the light themes push the other way. */
 #sb-title { font-weight: 600; }
+#sb-title .wm-seen { color: color-mix(in srgb, var(--fg) 35%, #fff); }
+#sb-title .wm-diff { color: color-mix(in srgb, var(--fg) 70%, var(--fg-dim)); }
+:root[data-theme="light"] #sb-title .wm-seen,
+:root[data-theme="solarized-light"] #sb-title .wm-seen { color: var(--fg); }
 #sb-stats { color: var(--fg-dim); font-size: 12px; margin-top: 2px; }
 #sb-base { color: var(--fg-dim); font-size: 11px; margin-top: 2px;
   font-family: var(--mono-font), monospace; }
@@ -492,7 +499,7 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
 <body>
 <nav id="sidebar">
   <div id="sb-head">
-    <div id="sb-title">seendiff</div>
+    <div id="sb-title"><span class="wm-seen">seen</span><span class="wm-diff">diff</span></div>
     <div id="sb-stats">loading…</div>
     <div id="sb-progress"><span class="rev"></span><span class="seen"></span></div>
     <div id="sb-base"></div>

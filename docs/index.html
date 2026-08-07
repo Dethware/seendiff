@@ -33,7 +33,11 @@ code { font: inherit; }
 
 /* ── hero: centred, and short enough to read in one breath ─ */
 header { padding: 92px 0 8px; text-align: center; }
+/* The wordmark says what the tool does: "seen" carries it, "diff" steps back
+   half a tone so the eye lands on the part that is the idea. */
 h1 { margin: 0; font-size: 36px; }
+.wm-seen { color: color-mix(in srgb, var(--fg) 35%, #fff); }
+.wm-diff { color: color-mix(in srgb, var(--fg) 70%, var(--fg-dim)); }
 .tagline { margin: 14px auto 0; font-size: 17px; max-width: 64ch; }
 .sub { margin: 10px auto 0; color: var(--fg-dim); max-width: 56ch; }
 .sub strong { color: var(--fg); font-weight: 700; }
@@ -198,7 +202,7 @@ footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border
 <main>
 
 <header>
-  <h1>seendiff</h1>
+  <h1><span class="wm-seen">seen</span><span class="wm-diff">diff</span></h1>
   <p class="tagline">A local, point-in-time diff reviewer for large diffs.</p>
   <p class="sub">View large diffs, while keeping track of what is seen and reviewed.</p>
   <p class="sub"><strong>Optimized for AI coding agents.</strong></p>
