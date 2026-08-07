@@ -18,7 +18,7 @@ View large diffs, while keeping track of what is seen and reviewed.
 
 <br>
 
-![seendiff](docs/img/app.png)
+![seendiff reviewing its own diff: the sidebar reports 16 of 52 blocks reviewed across 7 files with a per-file progress bar, and the main pane shows a unified, syntax-highlighted diff of git.py](docs/img/app.png)
 
 Your branch's full diff against `origin/master`, every changed file shown **whole**
 rather than as hunk fragments. Review state survives closing the window, and a rebase.
