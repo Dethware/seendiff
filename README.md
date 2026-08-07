@@ -11,7 +11,7 @@ View large diffs, while keeping track of what is seen and reviewed.
 
 <div align="center">
 
-### [open website](https://acme-dot-bot.github.io/seendiff/) 
+### [seendiff.com](https://seendiff.com/)
 
 
 </div>
