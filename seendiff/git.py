@@ -11,12 +11,22 @@ hash of the changed lines, position-independent.
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 from dataclasses import dataclass, field
 
 from unidiff import PatchSet
 
 MERGE_GAP = 3
+
+# A block that covers a whole rewritten file is useless to review: it is one
+# checkbox for two thousand lines. So an oversized block is cut into sections
+# of between SECTION_MIN and SECTION_MAX changed lines, preferring a cut where
+# the code itself has a seam (a definition, an unindented line, a blank line,
+# or the -/+ turn). Both bounds are parameters, not a target plus a window, so
+# "sections are 20 to 60 lines" says exactly what it means.
+SECTION_MIN = 12
+SECTION_MAX = 48
 BASE_CANDIDATES = ["origin/master", "origin/main", "master", "main"]
 WHOLE_FILE_ID = "*"
 
@@ -26,9 +36,13 @@ class GitError(RuntimeError):
 
 
 def _git(repo: str, *args: str) -> str:
+    # Explicit UTF-8, and never raise on a stray byte: git's output can carry
+    # anything a file or a branch name contains, and one undecodable byte must
+    # not take a request down. (text=True would use the locale encoding, which
+    # is cp1252 on Windows.)
     proc = subprocess.run(
         ["git", "-C", repo, "-c", "core.quotePath=false", *args],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if proc.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
@@ -207,6 +221,109 @@ def _strip_ab(path: str) -> str:
     return path
 
 
+# Language-agnostic on purpose: no parser, no per-language table. A cut is
+# preferred where a line looks like the start of a definition *and* sits at
+# indent 0 — the two heuristics reinforce each other, and a file with neither
+# (JSON, minified JS) simply falls back to the size bound.
+_DEF_RE = re.compile(
+    r"^(@\w|#\s*(define|include|pragma)\b|"
+    r"(export|default|public|private|protected|internal|static|final|"
+    r"abstract|pub|async|inline|extern)\s+)*"
+    r"(def|class|fn|func|function|impl|struct|enum|trait|interface|"
+    r"namespace|module|mod|package|type|template|const|let|var)\b"
+)
+
+
+def _seam_score(lines: list[tuple[str, str]], i: int) -> int:
+    """How good a cut between lines[i-1] and lines[i] is. 0 = arbitrary."""
+    prev_type, prev_text = lines[i - 1]
+    cur_type, cur_text = lines[i]
+    score = 0
+    if cur_type != prev_type:
+        score += 4                      # the -/+ turn: removals, then their replacement
+    if not prev_text.strip():
+        score += 2                      # a blank line already separates these
+    body = cur_text.rstrip("\r\n")
+    stripped = body.lstrip()
+    if stripped:
+        if len(body) - len(stripped) == 0:
+            score += 2                  # top level
+        if _DEF_RE.match(stripped):
+            score += 3                  # ...and it declares something
+    return score
+
+
+def _cut_points(lines: list[tuple[str, str]], lo: int, hi: int) -> list[int]:
+    """Indices to cut a run at, each section between lo and hi lines long."""
+    cuts: list[int] = []
+    start, n = 0, len(lines)
+    while n - start > hi:
+        lower = start + lo
+        upper = min(start + hi, n - lo)   # leave the tail at least lo lines
+        if upper < lower:
+            upper = min(start + hi, n - 1)
+        if upper < lower:
+            break
+        # best seam wins; ties go to the longer section, so we cut less often
+        cut = max(range(lower, upper + 1), key=lambda i: (_seam_score(lines, i), i))
+        cuts.append(cut)
+        start = cut
+    return cuts
+
+
+def _split_run(run: Run, lo: int, hi: int) -> list[Run]:
+    """One oversized run into several, line numbers recomputed per section."""
+    cuts = _cut_points(run.lines, lo, hi)
+    if not cuts:
+        return [run]
+    subs: list[Run] = []
+    bounds = [0, *cuts, len(run.lines)]
+    dels = adds = 0
+    for lo_i, hi_i in zip(bounds, bounds[1:]):
+        seg = run.lines[lo_i:hi_i]
+        nd = sum(1 for t, _ in seg if t == "-")
+        na = len(seg) - nd
+        # a zero-length side keeps git's "anchor at the line before" convention
+        # loosely: nothing reads it, since _tag_rows iterates an empty range.
+        subs.append(Run(src_start=run.src_start + dels, src_len=nd,
+                        tgt_start=run.tgt_start + adds, tgt_len=na, lines=seg))
+        dels += nd
+        adds += na
+    return subs
+
+
+def _changed(runs: list[Run]) -> int:
+    return sum(len(r.lines) for r in runs)
+
+
+def split_blocks(blocks: list[Block], lo: int = SECTION_MIN,
+                 hi: int = SECTION_MAX) -> list[Block]:
+    """Cut blocks larger than hi into sections. Run boundaries first: a block
+    that is several runs merged across small gaps splits between them, which
+    is where the edit itself paused. Only a single run larger than hi is cut
+    internally, at the best seam its lines offer."""
+    out: list[Block] = []
+    for b in blocks:
+        if _changed(b.runs) <= hi:
+            out.append(b)
+            continue
+        group: list[Run] = []
+        for run in b.runs:
+            if len(run.lines) > hi:
+                if group:
+                    out.append(Block(runs=group))
+                    group = []
+                out.extend(Block(runs=[sub]) for sub in _split_run(run, lo, hi))
+                continue
+            if group and _changed(group) + len(run.lines) > hi:
+                out.append(Block(runs=group))
+                group = []
+            group.append(run)
+        if group:
+            out.append(Block(runs=group))
+    return out
+
+
 def _group_blocks(hunks: list[Run]) -> list[Block]:
     blocks: list[Block] = []
     for run in hunks:
@@ -229,7 +346,9 @@ def _assign_ids(blocks: list[Block]) -> None:
 _SUBPROJECT = "Subproject commit "
 
 
-def identity_diff(repo: str, mb_sha: str, rev: str = "HEAD") -> list[FileDiff]:
+def identity_diff(repo: str, mb_sha: str, rev: str = "HEAD",
+                  section_min: int = SECTION_MIN,
+                  section_max: int = SECTION_MAX) -> list[FileDiff]:
     """The startup -U0 pass: every changed file with grouped, hashed blocks."""
     out = _git(repo, "diff", "--no-ext-diff", "--no-color", "--unified=0",
                "--find-renames", mb_sha, rev, "--")
@@ -244,7 +363,7 @@ def identity_diff(repo: str, mb_sha: str, rev: str = "HEAD") -> list[FileDiff]:
             )
             for h in pf
         ]
-        blocks = _group_blocks(runs)
+        blocks = split_blocks(_group_blocks(runs), section_min, section_max)
         _assign_ids(blocks)
         fd = FileDiff(
             path=_strip_ab(pf.path),
@@ -279,7 +398,9 @@ def _pointer_shas(fd: FileDiff) -> tuple[str | None, str | None]:
     return old, new
 
 
-def expand_submodules(repo: str, files: list[FileDiff]) -> list[FileDiff]:
+def expand_submodules(repo: str, files: list[FileDiff],
+                      section_min: int = SECTION_MIN,
+                      section_max: int = SECTION_MAX) -> list[FileDiff]:
     """After a submodule pointer item, splice in the submodule's inner diff.
 
     Best-effort: if the submodule isn't initialized or either commit isn't
@@ -297,7 +418,9 @@ def expand_submodules(repo: str, files: list[FileDiff]) -> list[FileDiff]:
         if not (old and new) or not os.path.isdir(sub_repo):
             continue
         try:
-            inner = identity_diff(sub_repo, old, rev=new)
+            inner = identity_diff(sub_repo, old, rev=new,
+                                  section_min=section_min,
+                                  section_max=section_max)
         except GitError:
             continue
         for ifd in inner:

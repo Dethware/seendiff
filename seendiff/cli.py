@@ -33,6 +33,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="clear review state for this scope, then continue")
     ap.add_argument("--no-auto-seen", action="store_true")
     ap.add_argument("--no-highlight", action="store_true")
+    ap.add_argument("--section-min", type=int, default=G.SECTION_MIN,
+                    metavar="N", help="smallest review section, in changed "
+                    f"lines (default {G.SECTION_MIN})")
+    ap.add_argument("--section-max", type=int, default=G.SECTION_MAX,
+                    metavar="N", help="largest review section, in changed "
+                    f"lines (default {G.SECTION_MAX}); a bigger block is cut "
+                    "at the nearest seam in the code")
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--walkthrough", metavar="PATH", default=None,
@@ -40,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--check-walkthrough", metavar="PATH", default=None,
                     help="validate a walkthrough JSON, print diagnostics, exit 0/1")
     args = ap.parse_args(argv)
+
+    if args.section_min < 1 or args.section_max < 2 * args.section_min:
+        print("seendiff: --section-max must be at least twice --section-min",
+              file=sys.stderr)
+        return 1
 
     try:
         repo = G.repo_root(".")
@@ -64,7 +76,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.check_walkthrough:
         hunk_ids = {fd.path: {b.hunk_id for b in fd.blocks}
                     for fd in G.expand_submodules(
-                        repo, G.identity_diff(repo, G.merge_base(repo, base_ref)))}
+                        repo,
+                        G.identity_diff(repo, G.merge_base(repo, base_ref),
+                                        section_min=args.section_min,
+                                        section_max=args.section_max),
+                        args.section_min, args.section_max)}
         problems = W.check(args.check_walkthrough, repo, hunk_ids)
         for p in problems:
             print(p, file=sys.stderr)
@@ -79,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     st = AppState(repo=repo, base_ref=base_ref,
+                  section_min=args.section_min,
+                  section_max=args.section_max,
                   no_highlight=args.no_highlight,
                   auto_seen=not args.no_auto_seen,
                   wt_file=args.walkthrough)

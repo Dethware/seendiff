@@ -63,6 +63,8 @@ class AppState:
     base_ref: str
     no_highlight: bool = False
     auto_seen: bool = True
+    section_min: int = G.SECTION_MIN
+    section_max: int = G.SECTION_MAX
     db_path: str | None = None
 
     mb_sha: str = ""
@@ -138,7 +140,11 @@ class AppState:
             self.scope = store.scope_key(self.repo, self.base_ref, self.branch,
                                          self.mb_sha)
             self.files = G.expand_submodules(
-                self.repo, G.identity_diff(self.repo, self.mb_sha))
+                self.repo,
+                G.identity_diff(self.repo, self.mb_sha,
+                                section_min=self.section_min,
+                                section_max=self.section_max),
+                self.section_min, self.section_max)
             self.by_path = {f.path: f for f in self.files}
             self.dirty, self.conflicted = G.dirty_and_conflicted(self.repo)
             self.file_cache.clear()
@@ -173,15 +179,29 @@ def _file_states(st: AppState, db) -> dict[tuple[str, str], tuple]:
     return store.get_states(db, st.scope)
 
 
-def _counts(fd: G.FileDiff, states) -> tuple[int, int, int]:
+def _weight(b: G.Block) -> int:
+    """A block's share of the progress bar: its changed lines, never zero.
+
+    Counting blocks instead made the bar lie in both directions — a two-line
+    fix weighed the same as a two-hundred-line rewrite.
+    """
+    return (b.added + b.removed) or 1
+
+
+def _counts(fd: G.FileDiff, states) -> tuple[int, int, int, int, int, int]:
     seen = reviewed = 0
+    w_tot = w_seen = w_rev = 0
     for b in fd.blocks:
+        w = _weight(b)
+        w_tot += w
         s, r = states.get((fd.path, b.hunk_id), (None, None))
         if r:
             reviewed += 1
+            w_rev += w
         elif s:
             seen += 1
-    return len(fd.blocks), seen, reviewed
+            w_seen += w
+    return len(fd.blocks), seen, reviewed, w_tot, w_seen, w_rev
 
 
 def _build_file_payload(st: AppState, fd: G.FileDiff) -> dict:
@@ -317,13 +337,16 @@ def create_app(st: AppState) -> FastAPI:
         states = _file_states(st, db)
         files = []
         tot = tot_seen = tot_rev = 0
+        w_tot = w_seen = w_rev = 0
         for fd in st.files:
-            n, seen, rev = _counts(fd, states)
+            n, seen, rev, wt, ws, wr = _counts(fd, states)
             tot += n; tot_seen += seen; tot_rev += rev
+            w_tot += wt; w_seen += ws; w_rev += wr
             files.append({
                 "path": fd.path, "old_path": fd.old_path, "status": fd.status,
                 "added": fd.added, "removed": fd.removed,
                 "blocks": n, "seen": seen, "reviewed": rev,
+                "weight": wt, "seen_w": ws, "reviewed_w": wr,
             })
         return {
             "scope": st.scope,
@@ -333,7 +356,8 @@ def create_app(st: AppState) -> FastAPI:
             "head_sha": st.head_sha[:12],
             "dirty_files": st.dirty, "conflicted_files": st.conflicted,
             "auto_seen": st.auto_seen,
-            "stats": {"blocks": tot, "seen": tot_seen, "reviewed": tot_rev},
+            "stats": {"blocks": tot, "seen": tot_seen, "reviewed": tot_rev,
+                      "weight": w_tot, "seen_w": w_seen, "reviewed_w": w_rev},
             "files": files,
         }
 
@@ -454,6 +478,8 @@ def create_app(st: AppState) -> FastAPI:
         for fd in st.files:
             if truncated:
                 break
+            if not fd.has_content:
+                continue          # a PNG has no lines to match, and no payload
             hits = []
             for i, line in enumerate(_build_file_payload(st, fd)["lines"]):
                 m = rx.search(line_text(line))

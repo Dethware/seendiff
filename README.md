@@ -3,7 +3,7 @@
 A local, point-in-time diff reviewer for large diffs.
 
 View large diffs, while keeping track of what is seen and reviewed.
-**Coding agent optimized.**
+**Optimized for AI coding agents.**
 
 ![MIT](https://img.shields.io/badge/license-MIT-blue) ![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue) ![No build step](https://img.shields.io/badge/build%20step-none-green)
 
@@ -78,7 +78,8 @@ seendiff --port 8700     # a fixed port instead of a free one
 It picks a free port, starts a localhost server and opens your browser. `Ctrl-C` to stop.
 
 Also: `--fetch` (git fetch first — never implicit), `--clear` (drop this branch's review
-state), `--no-browser`, `--no-highlight`, `--no-auto-seen`.
+state), `--no-browser`, `--no-highlight`, `--no-auto-seen`, and
+`--section-min` / `--section-max` to resize the review sections described below.
 
 ## Fully keyboard driven
 
@@ -148,8 +149,8 @@ It's a symlink, if you'd rather do it yourself:
 ln -s "$(pwd)/skills/seendiff" ~/.claude/skills/seendiff
 ```
 
-Then, in any repo, ask for the walkthrough you want — *"explain the auth flow in this
-PR"*.
+Then, in any repo, ask for the walkthrough you want — *"explain this PR using a code
+walkthrough"*.
 
 ![walkthrough](docs/img/walkthrough.png)
 
@@ -200,6 +201,19 @@ A few decisions worth knowing:
 change the context setting. A block is a maximal run of adjacent changed lines, with a
 stable `hunk_id` derived from its content, so review state survives a rebase.
 
+**Sections, so a rewrite isn't one checkbox.** A block bigger than `--section-max` changed
+lines (48 by default) is cut into sections of at least `--section-min` (12), preferring a
+cut where the code has a seam: the turn from removed to added lines, a blank line, or an
+unindented line that declares something. No parser and no language table — the heuristic
+degrades to the size bound on JSON or minified files. Sections split between the diff's
+own runs before any single run is cut. Each keeps a content-derived id, so editing one
+section costs you only that section's review state, not the file's.
+
+**The bar is weighted by lines, not blocks.** A two-line fix and a two-hundred-line
+rewrite are both one block; counting them equally made the progress bar overstate small
+changes and understate big ones. The counter still reads in blocks — `12/44 reviewed` —
+because that's what you act on.
+
 **Scope is symbolic.** State is keyed on `repo | base_ref | branch`, *not* on commit SHAs.
 Amend, rebase or reword and your review state is still there.
 
@@ -232,10 +246,13 @@ pulls the functions straight out of `index.html`, so it can't drift from what sh
 
 ## Contributing
 
-Open an issue with a **prompt** for the feature you want — the ask, written the way you'd
-hand it to an agent. That's the useful contribution here.
+**Bugs** — file an issue with the details that make it reproducible: OS, environment,
+the exact nature of the failure, and any logs.
 
-No pull requests, please; they won't be merged. Feel free to fork.
+**Features** — submit them in the style of prompts to an LLM. The ask, written the way
+you'd hand it to an agent.
+
+**Customizations** — feel free to fork and customize!
 
 ## License
 

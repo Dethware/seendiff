@@ -799,7 +799,7 @@ function makeFileItem(f, label, indent) {
     const m = document.createElement("span"); m.className = "minus"; m.textContent = "−" + f.removed;
     counts.append(p, " ", m);
   }
-  right.append(counts, makeBar(f.reviewed, f.seen, f.blocks));
+  right.append(counts, makeBar(f.reviewed_w, f.seen_w, f.weight));
   item.append(glyph, name, right);
   item.onclick = () => openFile(f.path);
   return item;
@@ -832,11 +832,17 @@ function buildTree(files) {
   return root;
 }
 function aggregate(node) {
-  let a = { blocks: 0, seen: 0, reviewed: 0 };
-  for (const f of node.files) { a.blocks += f.blocks; a.seen += f.seen; a.reviewed += f.reviewed; }
+  // counts drive "done" and the hide filter; weights drive the bar, so a
+  // folder of one-line fixes can't look like a folder of rewrites
+  let a = { blocks: 0, seen: 0, reviewed: 0, weight: 0, seen_w: 0, reviewed_w: 0 };
+  for (const f of node.files) {
+    a.blocks += f.blocks; a.seen += f.seen; a.reviewed += f.reviewed;
+    a.weight += f.weight; a.seen_w += f.seen_w; a.reviewed_w += f.reviewed_w;
+  }
   for (const child of node.dirs.values()) {
     const c = aggregate(child);
     a.blocks += c.blocks; a.seen += c.seen; a.reviewed += c.reviewed;
+    a.weight += c.weight; a.seen_w += c.seen_w; a.reviewed_w += c.reviewed_w;
   }
   node.agg = a;
   return a;
@@ -855,7 +861,7 @@ function renderTree(list, node, prefix, indent) {
     arrow.className = "d-arrow"; arrow.textContent = isClosed ? "▸" : "▾";
     const dn = document.createElement("span");
     dn.className = "d-name"; dn.textContent = name + "/"; dn.title = full;
-    item.append(arrow, dn, makeBar(child.agg.reviewed, child.agg.seen, child.agg.blocks));
+    item.append(arrow, dn, makeBar(child.agg.reviewed_w, child.agg.seen_w, child.agg.weight));
     item.onclick = () => {
       isClosed ? collapsed.delete(full) : collapsed.add(full);
       saveCollapsed(); renderSidebar();
@@ -906,7 +912,7 @@ function renderSidebar() {
   const s = meta.stats;
   $("sb-stats").textContent =
     `${s.reviewed}/${s.blocks} reviewed · ${s.seen + s.reviewed} seen · ${meta.files.length} files`;
-  setMainBar(s.reviewed, s.seen, s.blocks);
+  setMainBar(s.reviewed_w, s.seen_w, s.weight);
   const done = s.blocks > 0 && s.reviewed >= s.blocks;
   if (allDone === null) allDone = done;          // no fanfare on page load
   else if (done && !allDone) { allDone = true; celebrate(); }
@@ -922,11 +928,15 @@ function renderSidebar() {
     banner.title = meta.dirty_files.concat(meta.conflicted_files).join("\n");
   } else banner.style.display = "none";
 }
-function bumpStats(f, dSeen, dRev) {
+function bumpStats(f, dSeen, dRev, w) {
   f.seen = Math.max(0, Math.min(f.blocks, f.seen + dSeen));
   f.reviewed = Math.max(0, Math.min(f.blocks, f.reviewed + dRev));
+  f.seen_w = Math.max(0, Math.min(f.weight, f.seen_w + dSeen * w));
+  f.reviewed_w = Math.max(0, Math.min(f.weight, f.reviewed_w + dRev * w));
   meta.stats.seen = Math.max(0, meta.stats.seen + dSeen);
   meta.stats.reviewed = Math.max(0, meta.stats.reviewed + dRev);
+  meta.stats.seen_w = Math.max(0, meta.stats.seen_w + dSeen * w);
+  meta.stats.reviewed_w = Math.max(0, meta.stats.reviewed_w + dRev * w);
   renderSidebar();
 }
 
@@ -1106,6 +1116,7 @@ function computeOffsets() {
       offsets[v + 1] = offsets[v] + h * LH;
     }
     spacer.style.height = (offsets[n] + 40) + "px";
+    for (const b of blocks) b.cov = undefined;   // px coverage, new geometry
     if (pane.clientWidth === paneW) break;
   }
 }
@@ -1332,12 +1343,14 @@ mm.addEventListener("click", e => {
 });
 
 /* ---------- review state ---------- */
+function blockWeight(b) { return (b.added + b.removed) || 1; }
 function setLocal(b, seen, reviewed) {
   const f = meta.files.find(x => x.path === curPath);
   const wasSeen = b.seen && !b.reviewed, wasRev = !!b.reviewed;
   b.seen = seen; b.reviewed = reviewed;
   const isSeen = seen && !reviewed, isRev = reviewed;
-  if (f) bumpStats(f, (isSeen ? 1 : 0) - (wasSeen ? 1 : 0), (isRev ? 1 : 0) - (wasRev ? 1 : 0));
+  if (f) bumpStats(f, (isSeen ? 1 : 0) - (wasSeen ? 1 : 0),
+                   (isRev ? 1 : 0) - (wasRev ? 1 : 0), blockWeight(b));
   renderRows(); drawMinimap();
 }
 function toggleReviewed(bi) {
@@ -1357,13 +1370,18 @@ function toggleFileReviewed(f) {
     api("DELETE", "/api/reviewed?file=" + encodeURIComponent(f.path));
     if (f.path === curPath) blocks.forEach(b => { b.reviewed = false; b.seen = true; });
     meta.stats.reviewed -= f.reviewed; meta.stats.seen += f.reviewed;
+    meta.stats.reviewed_w -= f.reviewed_w; meta.stats.seen_w += f.reviewed_w;
     f.seen = f.blocks; f.reviewed = 0;
+    f.seen_w = f.weight; f.reviewed_w = 0;
   } else {
     api("POST", "/api/reviewed", { file: f.path });
     if (f.path === curPath) blocks.forEach(b => { b.reviewed = true; b.seen = true; });
     meta.stats.reviewed += f.blocks - f.reviewed;
     meta.stats.seen -= f.seen;
+    meta.stats.reviewed_w += f.weight - f.reviewed_w;
+    meta.stats.seen_w -= f.seen_w;
     f.reviewed = f.blocks; f.seen = 0;
+    f.reviewed_w = f.weight; f.seen_w = 0;
   }
   renderSidebar(); renderRows(); drawMinimap();
 }
@@ -1381,10 +1399,21 @@ function evalSeen() {
   if (!file || !meta.auto_seen || !document.hasFocus()) { dwell.clear(); return; }
   const top = pane.scrollTop, bot = pane.scrollTop + pane.clientHeight;
   const now = performance.now();
+  // The last block can never be "scrolled past" — there is nothing below it to
+  // scroll to — and a block taller than the pane is never "fully visible", so
+  // either one alone would leave the bar stuck short of 100%. Sitting at the
+  // bottom of the file is the end of the read: whatever is on screen is seen.
+  const atBottom = pane.scrollTop + pane.clientHeight >= totalHeight() - 2;
   blocks.forEach((b, i) => {
     if (b.seen || b.reviewed) return;
-    if (offsets[b.r1 + 1] < top) { markSeen(b); return; }        // scrolled past
-    if (offsets[b.r0] >= top && offsets[b.r1 + 1] <= bot) {      // fully visible
+    const y0 = offsets[b.r0], y1 = offsets[b.r1 + 1];
+    if (y1 < top) { markSeen(b); return; }                       // scrolled past
+    if (y0 > bot) { dwell.delete(i); return; }                   // not reached yet
+    // Cover it progressively, from its top down: a tall block is seen once
+    // every part of it has passed through the pane, not only if it ever fit.
+    if (b.cov === undefined) b.cov = y0;
+    if (top <= b.cov) b.cov = Math.max(b.cov, Math.min(bot, y1));
+    if (b.cov >= y1 || atBottom) {
       if (!dwell.has(i)) dwell.set(i, now);
       else if (now - dwell.get(i) >= 500) markSeen(b);
     } else dwell.delete(i);
@@ -1601,7 +1630,8 @@ async function doResetAll() {
   await api("DELETE", "/api/state");
   seenQueue.clear(); dwell.clear();
   meta.stats.seen = 0; meta.stats.reviewed = 0;
-  meta.files.forEach(f => { f.seen = 0; f.reviewed = 0; });
+  meta.stats.seen_w = 0; meta.stats.reviewed_w = 0;
+  meta.files.forEach(f => { f.seen = 0; f.reviewed = 0; f.seen_w = 0; f.reviewed_w = 0; });
   blocks.forEach(b => { b.seen = false; b.reviewed = false; });
   renderSidebar(); renderRows(); drawMinimap();
   toast("review state reset");
