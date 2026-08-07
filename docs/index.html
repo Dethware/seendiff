@@ -188,11 +188,21 @@ footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border
   #run-it ~ section { padding-top: 92px; }
   header { padding-top: 60px; }
   h1 { font-size: 27px; }
-  /* no room to fan them out — one card per row */
-  .themes { flex-direction: column; gap: 16px; }
+}
+/* The fan needs 286px for the front card plus a 106px sliver each for the five
+   behind it — under ~900px it has nowhere to go, and a hover-to-lift trick means
+   nothing on a touch screen anyway. So: one card per row, each cropped to its top
+   third. That's where the chrome and the syntax colours are; the rows below it are
+   the same file list six times over. */
+@media (max-width: 900px) {
+  .themes { flex-direction: column; gap: 18px; }
   .themes figure { width: 100%; margin: 0; }
   .themes figure:hover { transform: none; }
-  .themes img { box-shadow: none; }
+  .themes img { box-shadow: none; height: 300px;
+    object-fit: cover; object-position: top; }
+}
+@media (hover: none) {
+  .themes figure:hover { transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
@@ -384,7 +394,7 @@ Pick whichever install method suits this machine, and tell me what you chose.</d
 <section>
   <h2>Beautiful</h2>
   <p>Six themes, each with a matching syntax palette, so colours change with the chrome
-    instead of staying bolted to one scheme. Hover a card to bring it forward.</p>
+    instead of staying bolted to one scheme.</p>
   <div class="themes">
     <figure><img src="img/theme-solarized-dark.png" width="325" height="709" loading="lazy"
       alt="seendiff sidebar, solarized dark theme"><figcaption>solarized-dark</figcaption></figure>
