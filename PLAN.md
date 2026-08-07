@@ -138,12 +138,22 @@ Three flags are load-bearing and cause silent breakage if omitted:
 - **`--find-renames`** — emits `rename from`/`rename to`, so a moved file keeps its
   review state instead of appearing as a delete plus an add.
 
-### Two invocations, one source of block identity
+### One invocation, one source of block identity
 
 | Call | When | Used for |
 |---|---|---|
 | `-U0` over whole diff | Once, at startup | **Block identity** (hashes), per-file counts, left nav, progress |
-| `-U999999 -- <old> <new>` | On file open, cached | Full file content for display |
+| `git show <head_sha>:<path>` | On file open, cached | The unchanged lines between the runs |
+
+**Never a second `git diff` for display.** The first cut asked git for the same diff
+again at `--unified=999999` and matched rows to blocks by line number. That is unsound:
+git's edit script is not stable across context widths. On a real change, a `)` line
+identical on both sides came back as *context* under `-U0` and as a delete/add pair at
+full context — 52 changed lines against 54. The two extra rows fell inside no block and
+`verify_tagging` raised through the HTTP layer as a 500 that took out the file view.
+Display rows are now replayed from the `-U0` runs themselves: everything between two runs
+is unchanged by definition and can be read off the new side, and deleted text lives in
+the runs. Rows and blocks come from one edit script, so they cannot disagree.
 
 An earlier draft used `-U3` for the identity pass and mapped git's hunk grouping onto the
 full-context display — self-described as the riskiest code in the project, because `-U3`
@@ -157,14 +167,17 @@ merge rule is ours and deterministic, so identity is stable across runs and reba
 without depending on git's hunk-splitting behaviour.
 
 **Mapping is arithmetic, not inference.** Each block carries its new-side line range
-directly from the `-U0` headers; tagging rendered rows in the full-context view is a
-line-number lookup. A deletion-only block (`target_length = 0`) anchors to the preceding
-new-side line — the one place to be careful; assert it against pure-deletion and
-pure-addition fixtures.
+directly from the `-U0` headers; tagging rendered rows is a line-number lookup. A
+deletion-only block (`target_length = 0`) anchors to the preceding new-side line — the
+one place to be careful; assert it against pure-deletion and pure-addition fixtures.
 
-**Per-file invocation must name both paths for renames.** `git diff -- <new_path>` alone
-cannot see the deletion at the old path, so rename detection silently degrades to
-add-only. Pass both the old and new path in the pathspec for renamed files.
+A split block's sub-runs anchor their zero-length side loosely (`tgt_start + adds`), which
+is fine for tagging — an empty range tags nothing — but wrong for replay. `FileDiff.runs`
+therefore keeps git's runs as they arrived, before `split_blocks` cut any of them.
+
+**Renames need no per-file pathspec** now that display replays the startup pass: the
+`-U0` call already ran `--find-renames` over the whole diff, so a renamed file's runs are
+in hand and only its new-side content is read.
 
 **Pure renames** with no content change emit no hunks under either pass — synthesize the
 `hunk_id = '*'` item (§14) and fall back to `git show <head_sha>:<path>` for content.
@@ -315,7 +328,7 @@ Prune rows with `seen_at` and `reviewed_at` both older than 60 days on startup.
 | Route | Behaviour |
 |---|---|
 | `GET /api/files` | `-U0` parse only: file list, block IDs, state, per-file counts. No line content. |
-| `GET /api/file?path=` | `-U999999` for one file: full lines, change blocks tagged with block IDs. Cached. |
+| `GET /api/file?path=` | The startup runs replayed against the file's new-side content: full lines, change blocks tagged with block IDs. Cached. |
 | `POST /api/seen` | Batch `{blocks: [{path, hunk_id}]}`. Idempotent, `sendBeacon`-friendly. |
 | `POST /api/reviewed` | Single or list. Backfills `seen_at`. |
 | `DELETE /api/reviewed` | Demotes to seen. `?file=` and `?all=` variants. |
@@ -580,7 +593,7 @@ free.
 ### Two-pass alignment
 
 The new-side file doesn't contain deleted lines, so one pass can't cover both sides.
-Reconstruct both from the `-U999999` diff — new side is context+adds, old side is
+Reconstruct both from the display rows — new side is context+adds, old side is
 context+dels — lex each independently, then map onto display rows: context and `+` rows
 take new-side tokens, `−` rows take old-side. Two lexer passes per file, ~20 extra lines,
 and correct even when a deleted line sat inside a multi-line string that no longer exists.
@@ -733,7 +746,7 @@ Handle in v1:
   display `old → new`.
 - **Detached HEAD** — no branch name for the scope key; fall back to merge-base SHA and
   say so.
-- **Pure renames** — no hunks under `-U999999`; fall back to `git show <sha>:<path>`.
+- **Pure renames** — no hunks at all; fall back to `git show <sha>:<path>` for content.
 
 Deferred, with reasons:
 

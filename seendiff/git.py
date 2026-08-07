@@ -1,8 +1,11 @@
 """Git integration: ref resolution, diff invocation, parsing, block grouping.
 
-Two invocations (see PLAN.md §4):
-  - `-U0` over the whole diff, once at startup: block identity + counts.
-  - `-U999999 -- <old> <new>` per file, on demand: full-file rows for display.
+One diff invocation (see PLAN.md §4): `-U0` over the whole diff, once at
+startup, for block identity and counts. Display rows are synthesized from those
+same runs plus the new file's content — never from a second `git diff`, because
+git's edit script is not stable across `-U` widths (a line identical on both
+sides can be context under `-U0` and a delete/add pair under full context), and
+two scripts that disagree leave rows no block can cover.
 
 Blocks are defined here, not by git: a block is one or more -U0 hunks ("runs")
 merged when separated by <= MERGE_GAP unchanged lines. Identity is a content
@@ -13,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 
 from unidiff import PatchSet
@@ -185,6 +189,9 @@ class FileDiff:
     removed: int
     blocks: list[Block] = field(default_factory=list)
     sub: SubInfo | None = None
+    # the -U0 runs as git emitted them, before split_blocks cut any of them:
+    # display rows are replayed from these, and blocks tile them exactly
+    runs: list[Run] = field(default_factory=list)
 
     @property
     def has_content(self) -> bool:
@@ -366,6 +373,7 @@ def identity_diff(repo: str, mb_sha: str, rev: str = "HEAD",
         blocks = split_blocks(_group_blocks(runs), section_min, section_max)
         _assign_ids(blocks)
         fd = FileDiff(
+            runs=runs,
             path=_strip_ab(pf.path),
             old_path=_strip_ab(pf.source_file) if pf.is_rename else None,
             status=status,
@@ -465,17 +473,50 @@ def worktree_rows(repo: str, path: str) -> list[Row]:
 
 # -------------------------------------------------------------- display pass
 
-def _rows_from_patched_file(pf) -> list[Row]:
+def _split_text(text: str) -> list[str]:
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
+def _rows_from_runs(runs: list[Run], new_text: str, path: str) -> list[Row]:
+    """Replay the -U0 runs against the new file to get full-context rows.
+
+    Everything between two runs is unchanged by definition, so it can be read
+    straight off the new side; deleted text only exists in the runs, which is
+    why they carry their lines. Doing it this way — rather than asking git for
+    the same diff again at full context — is what guarantees every changed row
+    falls inside a block: rows and blocks come from one edit script.
+    """
+    new_lines = _split_text(new_text)
     rows: list[Row] = []
-    for h in pf:
-        for l in h:
-            if l.line_type == " ":
-                rows.append(Row(l.source_line_no, l.target_line_no, "context",
-                                l.value.rstrip("\n")))
-            elif l.line_type == "+":
-                rows.append(Row(None, l.target_line_no, "add", l.value.rstrip("\n")))
-            elif l.line_type == "-":
-                rows.append(Row(l.source_line_no, None, "del", l.value.rstrip("\n")))
+    old_i = new_i = 1
+    for r in runs:
+        # git anchors a zero-length side *after* the line it names, so the last
+        # unchanged line before the run is `start` there and `start - 1` otherwise
+        ctx_end = r.tgt_start - 1 if r.tgt_len else r.tgt_start
+        if ctx_end > len(new_lines) or ctx_end < new_i - 1:
+            raise GitError(f"{path}: hunk at new line {r.tgt_start} does not fit "
+                           f"the file ({len(new_lines)} lines) — it changed under us")
+        while new_i <= ctx_end:
+            rows.append(Row(old_i, new_i, "context", new_lines[new_i - 1]))
+            old_i += 1
+            new_i += 1
+        dels = [t for k, t in r.lines if k == "-"]
+        adds = [t for k, t in r.lines if k == "+"]
+        rows += [Row(r.src_start + i, None, "del", t.rstrip("\n"))
+                 for i, t in enumerate(dels)]
+        rows += [Row(None, r.tgt_start + i, "add", t.rstrip("\n"))
+                 for i, t in enumerate(adds)]
+        if r.src_len:
+            old_i = r.src_start + r.src_len
+        if r.tgt_len:
+            new_i = r.tgt_start + r.tgt_len
+    while new_i <= len(new_lines):
+        rows.append(Row(old_i, new_i, "context", new_lines[new_i - 1]))
+        old_i += 1
+        new_i += 1
     return rows
 
 
@@ -517,38 +558,34 @@ def display_rows(repo: str, mb_sha: str, fd: FileDiff) -> list[Row]:
     base = fd.sub.old if fd.sub else mb_sha
     rev = fd.sub.new if fd.sub else "HEAD"
     rel = fd.sub.rel if fd.sub else fd.path
-    old_rel = fd.sub.old_rel if fd.sub else fd.old_path
 
-    if fd.status == "deleted":
+    if fd.status == "submodule":
+        # a gitlink has no blob to read: the pointer lines are the whole file
+        rows = _rows_from_runs(fd.runs, "", fd.path)
+    elif fd.status == "deleted":
         # new side is empty; render the old file as deletions
-        text = show_file(git_repo, base, rel)
         rows = [Row(i + 1, None, "del", line)
-                for i, line in enumerate(text.split("\n"))]
-        if rows and rows[-1].text == "":
-            rows.pop()
-    elif fd.has_content and any(b.runs for b in fd.blocks):
-        # both old and new path in the pathspec, or rename detection degrades
-        pathspec = [p for p in (old_rel, rel) if p]
-        out = _git(git_repo, "diff", "--no-ext-diff", "--no-color", "--unified=999999",
-                   "--find-renames", base, rev, "--", *dict.fromkeys(pathspec))
-        patch = PatchSet(out)
-        if not patch:
-            raise GitError(f"no diff output for {fd.path}")
-        rows = _rows_from_patched_file(patch[0])
+                for i, line in enumerate(_split_text(show_file(git_repo, base, rel)))]
+    elif fd.has_content and fd.runs:
+        rows = _rows_from_runs(fd.runs, show_file(git_repo, rev, rel), fd.path)
     else:
         # pure rename / mode-only / whole-file item: full content as context
         try:
             text = show_file(git_repo, rev, rel)
         except GitError:
             return []
-        rows = [Row(i + 1, i + 1, "context", line)
-                for i, line in enumerate(text.split("\n"))]
-        if rows and rows[-1].text == "":
-            rows.pop()
-        return rows
+        return [Row(i + 1, i + 1, "context", line)
+                for i, line in enumerate(_split_text(text))]
 
     _tag_rows(rows, fd.blocks)
-    verify_tagging(rows, fd.blocks, fd.path)
+    try:
+        verify_tagging(rows, fd.blocks, fd.path)
+    except AssertionError as e:
+        # An invariant break is a bug in here, not in the user's repo, and it
+        # must not cost them the file: untagged rows still read, they just
+        # can't be marked reviewed. Loud on the console, survivable in the UI.
+        print(f"seendiff: tagging invariant broken, showing {fd.path} "
+              f"without block marks — please report: {e}", file=sys.stderr)
     return rows
 
 
