@@ -1,6 +1,6 @@
 # seendiff
 
-A local, point-in-time diff reviewer for large diffs.
+A local, point-in-time diff tool for large diffs.
 
 View large diffs, while keeping track of what is seen and reviewed.
 **Optimized for AI coding agents.**
@@ -169,8 +169,8 @@ against the real diff before anything renders, so a stale one fails at load inst
 scrolling you somewhere wrong.
 
 The file may be **empty** (`{}`). That's not an error: seendiff opens as a plain diff
-reviewer and watches it, so an agent can write a script later and every open tab picks it
-up within a couple of seconds — no relaunch, no new tab.
+tool and watches it, so an agent can write a script later and every open tab picks it up
+within a couple of seconds — no relaunch, no new tab.
 
 ## Architecture
 

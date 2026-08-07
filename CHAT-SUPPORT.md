@@ -113,7 +113,7 @@ conversation attached to a line."
 Hold a `thread_id -> client` map. Construct each session with:
 
 - `cwd` = the repo root seendiff already resolved
-- a system-prompt append explaining it is embedded in a diff reviewer
+- a system-prompt append explaining it is embedded in a diff tool
 - `allowed_tools` — read-only for v0 (see Permissions)
 - `env` = `_agent_env()`
 - `model` — Sonnet or Haiku, not Opus (see Rate limits)
@@ -165,7 +165,7 @@ point-in-time like the rest of seendiff's state.
 
 ## Permissions
 
-The agent can edit files. In a diff reviewer that is a feature — fix the thing
+The agent can edit files. In a diff tool that is a feature — fix the thing
 you are reviewing — but it needs a gate.
 
 The SDK supports a pre-tool-use callback: invoked before any tool runs, returns

@@ -24,7 +24,7 @@ def free_port() -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="seendiff",
-        description="Point-in-time diff reviewer with persistent review state.")
+        description="Point-in-time diff tool with persistent review state.")
     ap.add_argument("base", nargs="?", default=None,
                     help="base ref (default: origin/master, with fallbacks)")
     ap.add_argument("--fetch", action="store_true",

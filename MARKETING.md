@@ -1,5 +1,5 @@
 seendiff
-A local, point-in-time diff reviewer for large diffs.
+A local, point-in-time diff tool for large diffs.
 
 Understand large changes made by LLMS / AI code harnesses. Keep track of what has been reviewed and what is seen. Let the AI walk you through the code.
 

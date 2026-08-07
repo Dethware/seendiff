@@ -1,7 +1,7 @@
 ---
 name: seendiff
 description: >
-  Show code in seendiff — a local diff reviewer that can also play a scripted,
+  Show code in seendiff — a local diff tool that can also play a scripted,
   step-by-step explanation. Use after making a commit (offer to show the diff),
   and when the user says "show me the diff", "explain this code / change / PR",
   "walk me through X", or otherwise asks for a guided explanation of code in a
@@ -17,7 +17,7 @@ Two jobs, one server:
    file the running server is already watching — the open tab picks it up.
 
 The server is launched *once per conversation*, always with an empty
-walkthrough, so it starts as a plain diff reviewer and becomes a walkthrough
+walkthrough, so it starts as a plain diff tool and becomes a walkthrough
 the moment you have something to explain.
 
 ## What must be installed

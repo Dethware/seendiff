@@ -1,6 +1,6 @@
 # seendiff — implementation spec
 
-A local, point-in-time diff reviewer for stacked commits. Renders the full diff of a
+A local, point-in-time diff tool for stacked commits. Renders the full diff of a
 branch against `origin/master`, shows changed files whole (not as hunk fragments), tracks
 which changes you've looked at and which you've explicitly signed off, and makes it easy
 to copy precise line references for pasting into an LLM.

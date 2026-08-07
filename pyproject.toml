@@ -1,7 +1,7 @@
 [project]
 name = "seendiff"
 version = "0.1.0"
-description = "Local point-in-time diff reviewer with persistent review state"
+description = "Local point-in-time diff tool with persistent review state"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
