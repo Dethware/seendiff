@@ -40,6 +40,7 @@
      to burn against. Light mode keeps the flat colour — mixing toward white
      on a white page is how you get washed out. */
   --neon: color-mix(in srgb, var(--add-sign) 82%, #fff);
+  --file-neon: var(--neon);
   --trough: color-mix(in srgb, #000 58%, var(--bg));
 }
 :root[data-theme="light"] {
@@ -91,15 +92,20 @@
   --toast-bg: #d8d8dc; --toast-fg: #111113;
 }
 :root[data-theme="hailmary"] {
-  --bg: #0f0f11; --bg2: #1a1a1c; --fg: #c6c0b4; --fg-dim: #7e786d;
-  --border: #2e2c2b; --accent: #4e8f94;
+  /* the blacks carry a mild bottle-green cast, and the two panes take it at
+     slightly different strengths so they still read as separate surfaces */
+  --bg: #0c1210; --bg2: #161e1a; --fg: #c6c0b4; --fg-dim: #7e786d;
+  --border: #2c322d; --accent: #4e8f94;
   --add-bg: rgba(143,156,94,.10); --del-bg: rgba(184,94,58,.10);
   --add-sign: #8f9c5e; --del-sign: #b85e3a; --mixed: #c19a51;
   --sel-bg: rgba(78,143,148,.22); --focus-ring: #4e8f94;
-  --toast-bg: #d2ccc0; --toast-fg: #0f0f11;
+  --toast-bg: #d2ccc0; --toast-fg: #0c1210;
   /* the palette's rust is too muted to read as neon: the progress bar (and
      only the progress bar) runs a saturated version of it */
   --neon: #ff4a1f;
+  /* the file/dir bars run their own yellow-orange, a step down the same heat
+     from the main bar's red so the two don't compete */
+  --file-neon: #ffa53d;
 }
 /* hailmary syntax grading: coffee is close but leaves attributes the same tan as
    plain text and keywords flat grey — both matter in markup-heavy files. These
@@ -276,14 +282,15 @@ button:hover { border-color: var(--accent); }
   font-family: var(--mono-font), monospace; white-space: nowrap; }
 .f-counts .plus { color: var(--add-sign); } .f-counts .minus { color: var(--del-sign); }
 /* file and directory bars stay solid — ticks are the main bar's signature —
-   but they light up in the same neon. drop-shadow, not box-shadow: a 0%-wide
+   and they light in --file-neon, which follows the main bar unless a theme
+   splits them. drop-shadow, not box-shadow: a 0%-wide
    solid paints nothing, so an untouched file casts no glow. */
 .f-bar { width: 64px; height: 5px; display: flex;
   background: color-mix(in srgb, var(--fg) 14%, transparent);
   border-radius: 2px; }
-.f-bar .rev { background: var(--neon); height: 100%; border-radius: 2px;
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--neon) 75%, transparent)); }
-.f-bar .seen { background: color-mix(in srgb, var(--neon) 40%, transparent);
+.f-bar .rev { background: var(--file-neon); height: 100%; border-radius: 2px;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--file-neon) 75%, transparent)); }
+.f-bar .seen { background: color-mix(in srgb, var(--file-neon) 40%, transparent);
   height: 100%; border-radius: 2px; }
 
 /* ---- main ---- */
