@@ -152,7 +152,9 @@ figure { margin: 30px 0 0; }
 figure img { display: block; width: 100%; height: auto;
   border: 1px solid var(--border); border-radius: 5px; }
 .shot { margin-top: 34px; }
-.shot img { box-shadow: 0 18px 44px -22px #000; }
+.shot img, .shot video { box-shadow: 0 18px 44px -22px #000; }
+.shot video { display: block; width: 100%; height: auto;
+  border: 1px solid var(--border); border-radius: 5px; background: var(--bg2); }
 
 /* Six full-size sidebars dealt like a hand of cards: each one overlaps the
    last, so only its left edge shows. Hovering lifts a card over its
@@ -233,8 +235,10 @@ footer { margin-top: 76px; padding-top: 20px; border-top: 1px solid var(--border
     <span>acme-dot-bot<span class="slash">/</span>seendiff</span></a>
 
   <figure class="shot">
-    <img src="img/app.png" width="1424" height="817"
-         alt="seendiff: the sidebar reports 16 of 52 blocks reviewed across 7 files, each file carrying its own progress bar, and the main pane shows a syntax-highlighted unified diff of git.py with old and new line numbers side by side and the minimap at the far right">
+    <video src="img/seendiff.mp4" poster="img/seendiff-poster.jpg"
+           width="1920" height="1080"
+           autoplay muted loop playsinline controls preload="metadata"
+           aria-label="seendiff walking through a diff: files in the sidebar with per-file progress, blocks marked seen as they scroll past, and reviewed marked by hand"></video>
   </figure>
 </header>
 

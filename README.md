@@ -13,12 +13,11 @@ View large diffs, while keeping track of what is seen and reviewed.
 
 ### [seendiff.com](https://seendiff.com/)
 
-
 </div>
 
 <br>
 
-![seendiff reviewing its own diff: the sidebar reports 16 of 52 blocks reviewed across 7 files with a per-file progress bar, and the main pane shows a unified, syntax-highlighted diff of git.py](docs/img/app.png)
+<video src="https://github.com/acme-dot-bot/seendiff/raw/main/docs/img/seendiff.mp4" poster="https://github.com/acme-dot-bot/seendiff/raw/main/docs/img/seendiff-poster.jpg" controls muted loop playsinline width="100%"></video>
 
 Your branch's full diff against `origin/master`, every changed file shown **whole**
 rather than as hunk fragments. Review state survives closing the window, and a rebase.
@@ -27,9 +26,9 @@ Not a merge tool: no editing, no conflict resolution, no comments. It's a reader
 
 ## Install
 
-You need **Python ≥ 3.10** and **git**. You are installing one thing: a CLI named
-`seendiff`. When it's done, `seendiff` runs from any directory, in a fresh shell, with no
-virtualenv activated and no path prefix.
+You need **Python ≥ 3.10** and **git**. You're installing one thing: a CLI named
+`seendiff`, which then runs from any directory, in a fresh shell, with no virtualenv
+activated and no path prefix.
 
 With [uv](https://docs.astral.sh/uv/) — it brings its own Python:
 
@@ -58,11 +57,10 @@ Or hand it to your coding agent:
 > Python CLI, needs Python 3.10+ and git. When you're done, `seendiff` runs from any
 > directory in a fresh shell, with no virtualenv activated and no path prefix.
 
-Four runtime dependencies: FastAPI, uvicorn, `unidiff`, Pygments. Nothing to build, no
-`node_modules`, no config file, no daemon.
-
-State lands in `~/.local/state/seendiff/state.db` (pruned after 60 days) and rendered
-files cache in `~/.cache/seendiff/` (30 days). Nothing else is written outside the repo.
+Four dependencies: FastAPI, uvicorn, `unidiff`, Pygments. Nothing to build, no config
+file, no daemon. State lands in `~/.local/state/seendiff/state.db` (pruned after 60
+days), rendered files in `~/.cache/seendiff/` (30 days). Nothing else is written outside
+the repo.
 
 ## Run it
 
@@ -79,7 +77,9 @@ It picks a free port, starts a localhost server and opens your browser. `Ctrl-C`
 
 Also: `--fetch` (git fetch first — never implicit), `--clear` (drop this branch's review
 state), `--no-browser`, `--no-highlight`, `--no-auto-seen`, and
-`--section-min` / `--section-max` to resize the review sections described below.
+`--section-min` / `--section-max` to resize review sections.
+
+![seendiff reviewing its own diff: the sidebar reports 16 of 52 blocks reviewed across 7 files with a per-file progress bar, and the main pane shows a unified, syntax-highlighted diff of git.py](docs/img/app.png)
 
 ## Fully keyboard driven
 
@@ -119,24 +119,16 @@ screen exist in the DOM. Whole-change search runs server-side via `/api/search`.
 
 `t` cycles six — **light**, **dark**, **solarized-light**, **solarized-dark**, **space**
 and **hailmary** — each with a matching Pygments palette, so syntax colours change with
-the chrome instead of staying bolted to one scheme.
-
-Theme, font, layout, sidebar width and collapsed folders persist **server-side**. Every
-run gets a fresh port, and browser storage is scoped per origin, so `localStorage` alone
-would forget.
+the chrome. Theme, font, layout, sidebar width and collapsed folders persist
+**server-side**: every run gets a fresh port, and `localStorage` is scoped per origin, so
+it alone would forget.
 
 ## Code walkthrough skill
 
-**AI + Human > AI or Human.**
-
-AI is a super-coder, but lacks the awareness and context to make the tradeoffs that drive
-your design decisions.
-
-Any sane codebase wants a pair of trained human eyes on it. This project was born out of
-that need.
-
-To that end, seendiff ships with a walkthrough mode — where a coding agent explains
-itself, step by step, on the diff.
+**AI + Human > AI or Human.** AI is a super-coder, but lacks the context to make the
+tradeoffs that drive your design decisions. Any sane codebase wants a pair of trained
+human eyes on it — so seendiff ships with a walkthrough mode, where a coding agent
+explains itself step by step, on the diff.
 
 Ask your coding agent to install the skill, once:
 
@@ -168,9 +160,8 @@ a [worked example](examples/seendiff-review-state.json). Every line reference is
 against the real diff before anything renders, so a stale one fails at load instead of
 scrolling you somewhere wrong.
 
-The file may be **empty** (`{}`). That's not an error: seendiff opens as a plain diff
-tool and watches it, so an agent can write a script later and every open tab picks it up
-within a couple of seconds — no relaunch, no new tab.
+The file may be **empty** (`{}`) — seendiff then opens as a plain diff tool and watches
+it, so an agent can write a script later and every open tab picks it up within seconds.
 
 ## Architecture
 
@@ -188,8 +179,8 @@ git ──► git.py ──────► server.py ──► static/index.html
 | file | lines | what it does |
 |---|---|---|
 | `static/index.html` | 2326 | The entire UI: markup, CSS and vanilla JS in one file. Virtual scroller, side-by-side and unified views, canvas minimap, search, six themes, walkthrough player. |
-| `server.py` | 526 | FastAPI on uvicorn, bound to `127.0.0.1`. Holds the diff in memory, recomputes only when HEAD moves, disk-caches rendered files, inlines the syntax palette into the page. |
-| `git.py` | 446 | Runs `git diff` via subprocess, parses it with `unidiff`, groups hunks into **blocks**, expands submodule pointers, and reconstructs each file's *whole* post-image with every line tagged added / removed / context. |
+| `server.py` | 526 | FastAPI on uvicorn, bound to `127.0.0.1`. Holds the diff in memory, recomputes only when HEAD moves, disk-caches rendered files. |
+| `git.py` | 446 | Runs `git diff`, parses it with `unidiff`, groups hunks into **blocks**, and reconstructs each file's *whole* post-image with every line tagged added / removed / context. |
 | `walkthrough.py` | 348 | Loads and validates walkthrough scripts against the real diff. |
 | `store.py` | 126 | SQLite: review state and UI preferences. Two tables, no ORM, no migrations. |
 | `cli.py` | 117 | argparse → pick a free port → open a browser → `uvicorn.run`. |
@@ -197,38 +188,31 @@ git ──► git.py ──────► server.py ──► static/index.html
 
 A few decisions worth knowing:
 
-**Blocks, not hunks.** A hunk is a diff-format artifact — its boundaries move when you
-change the context setting. A block is a maximal run of adjacent changed lines, with a
-stable `hunk_id` derived from its content, so review state survives a rebase.
+**Blocks, not hunks.** A hunk is a diff-format artifact — its boundaries move with the
+context setting. A block is a maximal run of adjacent changed lines, with a stable
+`hunk_id` derived from its content, so review state survives a rebase.
 
-**Sections, so a rewrite isn't one checkbox.** A block bigger than `--section-max` changed
-lines (48 by default) is cut into sections of at least `--section-min` (12), preferring a
-cut where the code has a seam: the turn from removed to added lines, a blank line, or an
-unindented line that declares something. No parser and no language table — the heuristic
-degrades to the size bound on JSON or minified files. Sections split between the diff's
-own runs before any single run is cut. Each keeps a content-derived id, so editing one
-section costs you only that section's review state, not the file's.
+**Sections, so a rewrite isn't one checkbox.** A block over `--section-max` changed lines
+(48) is cut into sections of at least `--section-min` (12), preferring a seam: the turn
+from removed to added lines, a blank line, or an unindented declaration. No parser, no
+language table. Each section keeps a content-derived id, so editing one costs you only
+that section's review state.
 
-**The bar is weighted by lines, not blocks.** A two-line fix and a two-hundred-line
-rewrite are both one block; counting them equally made the progress bar overstate small
-changes and understate big ones. The counter still reads in blocks — `12/44 reviewed` —
-because that's what you act on.
+**The bar is weighted by lines, not blocks** — a two-line fix and a two-hundred-line
+rewrite are both one block. The counter still reads in blocks (`12/44 reviewed`), because
+that's what you act on.
 
-**Scope is symbolic.** State is keyed on `repo | base_ref | branch`, *not* on commit SHAs.
-Amend, rebase or reword and your review state is still there.
-
-**Diff is immutable per (merge-base, HEAD).** Computed once, cached in memory; requests
-only re-stat the working tree for the dirty-files banner.
+**Scope is symbolic.** State is keyed on `repo | base_ref | branch`, *not* commit SHAs.
+Amend, rebase or reword and your review state is still there. The diff itself is immutable
+per (merge-base, HEAD): computed once, cached in memory.
 
 **The frontend is a virtual scroller.** Files run to tens of thousands of lines, so only
-the visible rows are in the DOM. Row geometry comes from real glyph metrics, remeasured
-once webfonts land — which is also what makes the canvas minimap line up.
+visible rows are in the DOM. Row geometry comes from real glyph metrics, remeasured once
+webfonts land — which is also what makes the minimap line up.
 
-**Server binds 127.0.0.1 and rejects any `Host` header that isn't localhost**, so a
-malicious page in another tab can't reach into your source tree via DNS rebinding.
-
-**Nothing leaves the machine.** No telemetry, no network calls, no accounts. `git fetch`
-runs only when you pass `--fetch`.
+**Nothing leaves the machine.** No telemetry, no accounts. The server binds 127.0.0.1 and
+rejects any `Host` header that isn't localhost, so another tab can't reach your source
+tree via DNS rebinding. `git fetch` runs only when you pass `--fetch`.
 
 [`PLAN.md`](PLAN.md) is the original build brief — motivation, rejected alternatives, and
 the reasoning behind each locked decision.
@@ -241,18 +225,14 @@ python3 -m venv .venv && .venv/bin/pip install -e . pytest
 ```
 
 35 tests: the walkthrough validator, the search endpoint, preference storage, and the
-search-match renderer — that last one runs under `node` (skipped if you don't have it) and
-pulls the functions straight out of `index.html`, so it can't drift from what ships.
+search-match renderer — that last one runs under `node` (skipped if absent) and pulls the
+functions straight out of `index.html`, so it can't drift from what ships.
 
 ## Contributing
 
-**Bugs** — file an issue with the details that make it reproducible: OS, environment,
-the exact nature of the failure, and any logs.
-
-**Features** — submit them in the style of prompts to an LLM. The ask, written the way
-you'd hand it to an agent.
-
-**Customizations** — feel free to fork and customize!
+**Bugs** — file an issue with the details that make it reproducible: OS, environment, the
+exact failure, and any logs. **Features** — submit them in the style of prompts to an LLM.
+**Customizations** — feel free to fork.
 
 ## License
 
