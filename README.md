@@ -13,9 +13,9 @@ View large diffs, while keeping track of what is seen and reviewed.
 
 ### [seendiff.com](https://seendiff.com/)
 
-[![Watch seendiff review a diff](docs/img/seendiff-poster-play.jpg)](https://github.com/acme-dot-bot/seendiff/raw/main/docs/img/seendiff.mp4)
+![seendiff reviewing its own diff: the sidebar reports 16 of 52 blocks reviewed across 7 files with a per-file progress bar, and the main pane shows a unified, syntax-highlighted diff of git.py](docs/img/app.png)
 
-**[▶ Watch the 40-second demo](https://github.com/acme-dot-bot/seendiff/raw/main/docs/img/seendiff.mp4)**
+**[▶ Watch the 40-second demo](https://seendiff.com/)**
 
 </div>
 
@@ -69,8 +69,6 @@ It picks a free port, starts a localhost server and opens your browser. `Ctrl-C`
 
 Also `--fetch` (never implicit), `--clear` (drop this branch's review state),
 `--no-browser`, `--no-highlight`, `--no-auto-seen`, `--section-min` / `--section-max`.
-
-![seendiff reviewing its own diff: the sidebar reports 16 of 52 blocks reviewed across 7 files with a per-file progress bar, and the main pane shows a unified, syntax-highlighted diff of git.py](docs/img/app.png)
 
 ## Fully keyboard driven
 
