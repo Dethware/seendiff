@@ -1,0 +1,19 @@
+_note() {
+  cat <<'MSG'
+==> seendiff ships a Claude Code skill in /usr/share/seendiff/skills/seendiff
+    To install it (or update an installed copy), run as your user:
+      mkdir -p ~/.claude/skills
+      cp -r /usr/share/seendiff/skills/seendiff ~/.claude/skills/
+==> `git cm` commits what's staged using a COMMIT_MSG_<description>.txt
+    proposal from the repo root. A matching rule for agents is in
+    /usr/share/doc/seendiff-local/claude-commit-rule.md
+MSG
+}
+
+post_install() {
+  _note
+}
+
+post_upgrade() {
+  _note
+}

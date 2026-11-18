@@ -13,10 +13,14 @@ hash of the changed lines, position-independent.
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 
 from unidiff import PatchSet
@@ -34,12 +38,45 @@ SECTION_MAX = 48
 BASE_CANDIDATES = ["origin/master", "origin/main", "master", "main"]
 WHOLE_FILE_ID = "*"
 
+# A diff side is a commit-ish, or one of these two. They never reach git as a
+# revision: every reader branches on them first.
+INDEX = "@index"
+WORKTREE = "@worktree"
+# what HEAD diffs as before the first commit
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+# What a run compares. "all" is the branch *including* uncommitted work, which
+# is what a reviewer usually means by "my changes"; the other three are its
+# layers: committed (merge base → HEAD), staged (HEAD → index) and unstaged
+# (index → working tree, untracked files included).
+MODES = ("all", "committed", "staged", "unstaged")
+DEFAULT_MODE = "all"
+
+
+def mode_sides(mode: str, mb_sha: str, head_sha: str) -> tuple[str, str]:
+    return {
+        "all": (mb_sha, WORKTREE),
+        "committed": (mb_sha, head_sha),
+        "staged": (head_sha, INDEX),
+        "unstaged": (INDEX, WORKTREE),
+    }[mode]
+
 
 class GitError(RuntimeError):
     pass
 
 
-def _git(repo: str, *args: str) -> str:
+def _env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    # The UI polls git every couple of seconds while the user runs their own
+    # git commands: never take index.lock for an opportunistic stat refresh.
+    env = dict(os.environ, GIT_OPTIONAL_LOCKS="0")
+    if extra:
+        env.update(extra)
+    return env
+
+
+def _git(repo: str, *args: str, env: dict[str, str] | None = None,
+         input: str | None = None) -> str:
     # Explicit UTF-8, and never raise on a stray byte: git's output can carry
     # anything a file or a branch name contains, and one undecodable byte must
     # not take a request down. (text=True would use the locale encoding, which
@@ -47,6 +84,7 @@ def _git(repo: str, *args: str) -> str:
     proc = subprocess.run(
         ["git", "-C", repo, "-c", "core.quotePath=false", *args],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env=_env(env), input=input,
     )
     if proc.returncode != 0:
         raise GitError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
@@ -80,6 +118,14 @@ def rev_sha(repo: str, ref: str = "HEAD") -> str:
     return _git(repo, "rev-parse", ref).strip()
 
 
+def head_or_empty(repo: str) -> str:
+    """HEAD's sha, or the empty tree on a branch with no commits yet."""
+    try:
+        return _git(repo, "rev-parse", "--verify", "--quiet", "HEAD^{commit}").strip()
+    except GitError:
+        return EMPTY_TREE
+
+
 def commit_date(repo: str, sha: str) -> str:
     return _git(repo, "show", "-s", "--format=%cI", sha).strip()
 
@@ -90,6 +136,45 @@ def branch_name(repo: str) -> str | None:
         capture_output=True, text=True,
     )
     return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+@dataclass
+class WorkStatus:
+    staged: list[str] = field(default_factory=list)
+    unstaged: list[str] = field(default_factory=list)     # tracked files only
+    untracked: list[str] = field(default_factory=list)
+    conflicted: list[str] = field(default_factory=list)
+
+    @property
+    def dirty(self) -> list[str]:
+        return sorted(set(self.staged) | set(self.unstaged) | set(self.untracked))
+
+
+def work_status(repo: str) -> WorkStatus:
+    """One `git status` pass, split the way the diff modes are."""
+    out = _git(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    st = WorkStatus()
+    parts = out.split("\0")
+    i = 0
+    while i < len(parts):
+        entry = parts[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        xy, path = entry[:2], entry[3:]
+        if xy[0] in "RC":
+            i += 1                      # -z puts the rename source next
+        if xy == "??":
+            if not COMMIT_MSG_RE.fullmatch(path):     # a proposal, not the change
+                st.untracked.append(path)
+        elif "U" in xy or xy in ("AA", "DD"):
+            st.conflicted.append(path)
+        else:
+            if xy[0] not in " ?!":
+                st.staged.append(path)
+            if xy[1] != " ":
+                st.unstaged.append(path)
+    return st
 
 
 def dirty_and_conflicted(repo: str) -> tuple[list[str], list[str]]:
@@ -116,6 +201,89 @@ def fetch(repo: str) -> None:
 
 def show_file(repo: str, sha: str, path: str) -> str:
     return _git(repo, "show", f"{sha}:{path}")
+
+
+def show_side(repo: str, side: str, path: str) -> str:
+    """A file's text on one side of a diff: a commit, the index, or disk."""
+    if side == WORKTREE:
+        # universal newlines, like git output read in text mode above, so
+        # the replayed context and the -U0 runs agree on CRLF files
+        try:
+            with open(os.path.join(repo, path), encoding="utf-8",
+                      errors="replace", newline=None) as f:
+                return f.read()
+        except OSError as e:
+            raise GitError(f"cannot read {path}: {e}")
+    if side == INDEX:
+        return _git(repo, "show", f":{path}")
+    return show_file(repo, side, path)
+
+
+@contextlib.contextmanager
+def _untracked_index(repo: str):
+    """Env for a git call that should see untracked files as new files.
+
+    `git diff` only knows paths in the index. Rather than synthesize patches
+    for untracked files (and get binary detection, newline markers and hashes
+    subtly different from what git emits once the file is added), copy the
+    index aside and mark them intent-to-add there. The user's real index is
+    never touched. Yields None when there is nothing untracked.
+    """
+    untracked = _git(repo, "ls-files", "--others", "--exclude-standard",
+                     f"--exclude={COMMIT_MSG_GLOB}", "-z")
+    if not untracked.strip("\0"):
+        yield None
+        return
+    real = _git(repo, "rev-parse", "--git-path", "index").strip()
+    real = os.path.join(repo, real)
+    tmpdir = tempfile.mkdtemp(prefix="seendiff-idx-")
+    try:
+        tmp = os.path.join(tmpdir, "index")
+        if os.path.exists(real):
+            # copy2, not copyfile: the copy must keep the index's mtime. Git
+            # re-reads a file's content when its mtime is not older than the
+            # index file ("racy git"); a fresh mtime on the copy turns that
+            # off, and a same-size edit made within one timestamp tick of the
+            # last `git add` would then be reported as unchanged.
+            shutil.copy2(real, tmp)
+        env = {"GIT_INDEX_FILE": tmp}
+        _git(repo, "add", "--intent-to-add", "--pathspec-from-file=-",
+             "--pathspec-file-nul", env=env, input=untracked)
+        yield env
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def raw_diff(repo: str, old: str, new: str, untracked: bool = True) -> str:
+    """The -U0 patch text between two sides (see INDEX / WORKTREE).
+
+    --full-index puts real blob ids in every header — git hashes working-tree
+    content for it too — so one file's patch text identifies both of its
+    sides exactly, which is what the payload cache keys on.
+    """
+    args = ["diff", "--no-ext-diff", "--no-color", "--unified=0",
+            "--find-renames", "--full-index"]
+    if new in (INDEX, WORKTREE):
+        # Mid-merge, an unmerged path diffs as a combined (--cc) patch, which
+        # neither unidiff nor this viewer models. seendiff is not a merge
+        # tool: leave them out, the UI lists them as conflicted.
+        # (--diff-filter=u does not do it: the worktree side isn't unmerged.)
+        unmerged = sorted({line.split("\t", 1)[1] for line in
+                           _git(repo, "ls-files", "-u", "-z").split("\0")
+                           if "\t" in line})
+        spec = ["--", *(f":(exclude,literal){p}" for p in unmerged)]
+    else:
+        spec = ["--"]
+    if new == WORKTREE:
+        if old != INDEX:
+            args.append(old)
+        if not untracked:
+            return _git(repo, *args, *spec)
+        with _untracked_index(repo) as env:
+            return _git(repo, *args, *spec, env=env)
+    if new == INDEX:
+        return _git(repo, *args, "--cached", old, *spec)
+    return _git(repo, *args, old, new, *spec)
 
 
 # ---------------------------------------------------------------- data model
@@ -192,6 +360,11 @@ class FileDiff:
     # the -U0 runs as git emitted them, before split_blocks cut any of them:
     # display rows are replayed from these, and blocks tile them exactly
     runs: list[Run] = field(default_factory=list)
+    # what was compared: commit-ish, INDEX or WORKTREE
+    old_side: str = ""
+    new_side: str = "HEAD"
+    # hash of this file's patch text: changes iff either side's content does
+    fingerprint: str = ""
 
     @property
     def has_content(self) -> bool:
@@ -355,10 +528,19 @@ _SUBPROJECT = "Subproject commit "
 
 def identity_diff(repo: str, mb_sha: str, rev: str = "HEAD",
                   section_min: int = SECTION_MIN,
-                  section_max: int = SECTION_MAX) -> list[FileDiff]:
-    """The startup -U0 pass: every changed file with grouped, hashed blocks."""
-    out = _git(repo, "diff", "--no-ext-diff", "--no-color", "--unified=0",
-               "--find-renames", mb_sha, rev, "--")
+                  section_max: int = SECTION_MAX,
+                  untracked: bool = True) -> list[FileDiff]:
+    """The -U0 pass: every changed file with grouped, hashed blocks.
+
+    `mb_sha` and `rev` are diff sides: commit-ishes, INDEX or WORKTREE.
+    """
+    return parse_diff(raw_diff(repo, mb_sha, rev, untracked), mb_sha, rev,
+                      section_min, section_max)
+
+
+def parse_diff(out: str, old: str, new: str,
+               section_min: int = SECTION_MIN,
+               section_max: int = SECTION_MAX) -> list[FileDiff]:
     files: list[FileDiff] = []
     for pf in PatchSet(out):
         status = _file_status(pf)
@@ -380,6 +562,9 @@ def identity_diff(repo: str, mb_sha: str, rev: str = "HEAD",
             added=pf.added or 0,
             removed=pf.removed or 0,
             blocks=blocks,
+            old_side=old, new_side=new,
+            fingerprint=hashlib.sha256(
+                str(pf).encode("utf-8", "replace")).hexdigest()[:16],
         )
         if not fd.blocks:
             # binary, mode-only, or pure rename: synthesize one whole-file item
@@ -398,7 +583,9 @@ def _pointer_shas(fd: FileDiff) -> tuple[str | None, str | None]:
     for b in fd.blocks:
         for r in b.runs:
             for t, text in r.lines:
-                sha = text[len(_SUBPROJECT):].strip().rstrip("-dirty")
+                # removesuffix, not rstrip: rstrip("-dirty") eats any trailing
+                # 'd', 'i', 'r', 't' or 'y', and a hex sha can end in 'd'
+                sha = text[len(_SUBPROJECT):].strip().removesuffix("-dirty")
                 if t == "-":
                     old = sha
                 else:
@@ -415,7 +602,6 @@ def expand_submodules(repo: str, files: list[FileDiff],
     present locally, the pointer item alone remains (still reviewable).
     Depth 1 — nested submodules show as pointer items inside the inner diff.
     """
-    import os
     out: list[FileDiff] = []
     for fd in files:
         out.append(fd)
@@ -441,6 +627,78 @@ def expand_submodules(repo: str, files: list[FileDiff],
     return out
 
 
+# ------------------------------------------------------------- committing
+#
+# Proposed commit messages are plain files in the repo root, one per queued
+# change: COMMIT_MSG_<description>.txt. Several can wait at once (one for what
+# is staged, one for the next change, one per agent session), and an IDE sees
+# them as ordinary files. Committing takes what is staged plus one of them.
+
+COMMIT_MSG_RE = re.compile(r"COMMIT_MSG(?:[_.-][\w.-]*)?\.txt")
+COMMIT_MSG_GLOB = "/COMMIT_MSG*.txt"      # root only, like the regex
+COMMIT_MSG_MAX = 64_000
+
+
+def commit_msg_description(name: str) -> str:
+    d = name[len("COMMIT_MSG"):-len(".txt")].lstrip("_.-")
+    return d.replace("_", " ").replace("-", " ").strip() or "(untitled)"
+
+
+def commit_messages(repo: str) -> list[dict]:
+    """The proposed messages waiting in the repo root, oldest first."""
+    out = []
+    try:
+        names = os.listdir(repo)
+    except OSError:
+        return []
+    for name in names:
+        if not COMMIT_MSG_RE.fullmatch(name):
+            continue
+        full = os.path.join(repo, name)
+        try:
+            st = os.stat(full)
+            if not os.path.isfile(full) or st.st_size > COMMIT_MSG_MAX:
+                continue
+            with open(full, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            continue
+        out.append({"name": name, "description": commit_msg_description(name),
+                    # a string: nanoseconds since 1970 exceed 2**53, and a
+                    # JS number would round them, so no stamp would match
+                    "text": text, "mtime_ns": str(st.st_mtime_ns)})
+    out.sort(key=lambda m: (int(m["mtime_ns"]), m["name"]))
+    return out
+
+
+def staged_changes(repo: str) -> list[dict]:
+    """What a commit would take: `git diff --cached --name-status`."""
+    out = _git(repo, "diff", "--cached", "--name-status", "-z", "--find-renames")
+    parts = out.split("\0")
+    res, i = [], 0
+    while i < len(parts) and parts[i]:
+        status = parts[i]
+        if status[:1] in "RC":
+            res.append({"status": status[0], "path": parts[i + 2],
+                        "old_path": parts[i + 1]})
+            i += 3
+        else:
+            res.append({"status": status[0], "path": parts[i + 1]})
+            i += 2
+    return res
+
+
+def commit(repo: str, message: str) -> str:
+    """Commit what is staged with this message; returns "<sha> <subject>".
+
+    --cleanup=strip drops '#' lines and surrounding blank lines, the same as
+    committing from the editor, so a proposal can carry notes to the reviewer.
+    Hooks run as usual; their complaint comes back as the GitError text.
+    """
+    _git(repo, "commit", "--cleanup=strip", "-F", "-", input=message)
+    return _git(repo, "log", "-1", "--format=%h %s").strip()
+
+
 # ---------------------------------------------------------- worktree files
 
 WORKTREE_MAX_BYTES = 5_000_000
@@ -454,7 +712,6 @@ def worktree_rows(repo: str, path: str) -> list[Row]:
     the walkthrough validator already rejected such refs, so hitting one here
     means the file changed underneath us.
     """
-    import os
     full = os.path.join(repo, path)
     try:
         with open(full, "rb") as f:
@@ -555,8 +812,8 @@ def display_rows(repo: str, mb_sha: str, fd: FileDiff) -> list[Row]:
     """Full-context rows for one file, tagged with block IDs."""
     # submodule inner files diff inside the submodule repo between the pointers
     git_repo = fd.sub.repo if fd.sub else repo
-    base = fd.sub.old if fd.sub else mb_sha
-    rev = fd.sub.new if fd.sub else "HEAD"
+    base = fd.sub.old if fd.sub else (fd.old_side or mb_sha)
+    rev = fd.sub.new if fd.sub else fd.new_side
     rel = fd.sub.rel if fd.sub else fd.path
 
     if fd.status == "submodule":
@@ -564,14 +821,15 @@ def display_rows(repo: str, mb_sha: str, fd: FileDiff) -> list[Row]:
         rows = _rows_from_runs(fd.runs, "", fd.path)
     elif fd.status == "deleted":
         # new side is empty; render the old file as deletions
+        old_rel = (fd.sub.old_rel if fd.sub else fd.old_path) or rel
         rows = [Row(i + 1, None, "del", line)
-                for i, line in enumerate(_split_text(show_file(git_repo, base, rel)))]
+                for i, line in enumerate(_split_text(show_side(git_repo, base, old_rel)))]
     elif fd.has_content and fd.runs:
-        rows = _rows_from_runs(fd.runs, show_file(git_repo, rev, rel), fd.path)
+        rows = _rows_from_runs(fd.runs, show_side(git_repo, rev, rel), fd.path)
     else:
         # pure rename / mode-only / whole-file item: full content as context
         try:
-            text = show_file(git_repo, rev, rel)
+            text = show_side(git_repo, rev, rel)
         except GitError:
             return []
         return [Row(i + 1, i + 1, "context", line)

@@ -27,6 +27,18 @@ def main(argv: list[str] | None = None) -> int:
         description="Point-in-time diff tool with persistent review state.")
     ap.add_argument("base", nargs="?", default=None,
                     help="base ref (default: origin/master, with fallbacks)")
+    modes = ap.add_argument_group(
+        "what to compare (switchable in the UI with m / M)")
+    modes.add_argument("--mode", choices=G.MODES, default=G.DEFAULT_MODE,
+                       help="all: base → working tree, uncommitted work "
+                       "included (default); committed: base → HEAD; "
+                       "staged: HEAD → index; unstaged: index → working tree")
+    for m in G.MODES[1:]:
+        modes.add_argument(f"--{m}", dest="mode", action="store_const",
+                           const=m, help=f"shorthand for --mode {m}")
+    modes.add_argument("--no-untracked", action="store_true",
+                       help="leave untracked files out of the all / unstaged "
+                       "views")
     ap.add_argument("--fetch", action="store_true",
                     help="run git fetch before diffing (never implicit)")
     ap.add_argument("--clear", action="store_true",
@@ -46,6 +58,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="open a walkthrough JSON in walkthrough mode")
     ap.add_argument("--check-walkthrough", metavar="PATH", default=None,
                     help="validate a walkthrough JSON, print diagnostics, exit 0/1")
+    ap.add_argument("--list-blocks", action="store_true",
+                    help="print every block of the diff (path, hunk_id, "
+                    "new-side lines) for this mode and exit — the ids a "
+                    "walkthrough's hunk_id refs name")
     args = ap.parse_args(argv)
 
     if args.section_min < 1 or args.section_max < 2 * args.section_min:
@@ -64,23 +80,38 @@ def main(argv: list[str] | None = None) -> int:
     try:
         base_ref = G.resolve_base(repo, args.base)
     except G.GitError as e:
-        # a walkthrough of existing code doesn't need a base ref at all:
-        # warn and run with an empty diff (HEAD vs HEAD)
-        if not (args.walkthrough or args.check_walkthrough):
+        # Only an explicitly named base is fatal. Without one, a repo with no
+        # origin/master|main (a fresh repo, a `develop` trunk) still has
+        # uncommitted work to show, and a walkthrough of existing code needs
+        # no base at all: compare against HEAD.
+        if args.base:
             print(f"seendiff: {e}", file=sys.stderr)
             return 1
-        print(f"seendiff: {e} — walkthrough mode, using an empty diff",
-              file=sys.stderr)
+        print(f"seendiff: {e} — using HEAD as the base", file=sys.stderr)
         base_ref = "HEAD"
 
+    st = AppState(repo=repo, base_ref=base_ref,
+                  section_min=args.section_min,
+                  section_max=args.section_max,
+                  no_highlight=args.no_highlight,
+                  auto_seen=not args.no_auto_seen,
+                  default_mode=args.mode,
+                  untracked=not args.no_untracked,
+                  wt_file=args.walkthrough)
+
+    if args.list_blocks:
+        for fd in st.files:
+            for b in fd.blocks:
+                where = (f"{b.new_start}-{b.new_end}" if b.runs
+                         else "whole-file")
+                print(f"{fd.path}\t{b.hunk_id}\t{where}\t"
+                      f"+{b.added} -{b.removed}\t{fd.status}")
+        return 0
+
     if args.check_walkthrough:
-        hunk_ids = {fd.path: {b.hunk_id for b in fd.blocks}
-                    for fd in G.expand_submodules(
-                        repo,
-                        G.identity_diff(repo, G.merge_base(repo, base_ref),
-                                        section_min=args.section_min,
-                                        section_max=args.section_max),
-                        args.section_min, args.section_max)}
+        # the same diff the server would show in this mode, so hunk_id refs
+        # are checked against what the reader will actually see
+        hunk_ids = st.hunk_ids()
         problems = W.check(args.check_walkthrough, repo, hunk_ids)
         for p in problems:
             print(p, file=sys.stderr)
@@ -94,20 +125,12 @@ def main(argv: list[str] | None = None) -> int:
                   f"{len(wt.steps)} steps")
         return 0
 
-    st = AppState(repo=repo, base_ref=base_ref,
-                  section_min=args.section_min,
-                  section_max=args.section_max,
-                  no_highlight=args.no_highlight,
-                  auto_seen=not args.no_auto_seen,
-                  wt_file=args.walkthrough)
-
     if args.clear:
         db = store.open_db()
-        mb = G.merge_base(repo, base_ref)
-        scope = store.scope_key(repo, base_ref, G.branch_name(repo), mb)
-        store.clear_scope(db, scope)
+        st.snapshot(st.default_mode)          # derives the scope
+        store.clear_scope(db, st.scope)
         db.close()
-        print(f"cleared review state for {scope}")
+        print(f"cleared review state for {st.scope}")
 
     app = create_app(st)          # runs the initial refresh
     if args.walkthrough:
@@ -124,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     port = args.port or free_port()
     url = f"http://127.0.0.1:{port}/"
     print(f"seendiff: {st.branch or 'detached'} vs {base_ref} "
-          f"(merge base {st.mb_sha[:12]}) — {url}")
+          f"(merge base {st.mb_sha[:12]}), showing {args.mode} — {url}")
     if not args.no_browser:
         threading.Timer(0.6, webbrowser.open, args=(url,)).start()
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

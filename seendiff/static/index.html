@@ -168,6 +168,17 @@ button:hover { border-color: var(--accent); }
   font-family: var(--mono-font), monospace; }
 #dirty-banner { margin-top: 6px; font-size: 12px; color: var(--mixed);
   cursor: default; display: none; }
+/* mode tabs: what is being compared. Counts are changed files per mode. */
+#sb-modes { display: flex; gap: 0; margin-top: 8px; border: 1px solid var(--border);
+  border-radius: 4px; overflow: hidden; font-size: 11.5px; }
+#sb-modes button { flex: 1 1 0; min-width: 0; border: none; border-radius: 0;
+  padding: 3px 2px; color: var(--fg-dim); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+#sb-modes button + button { border-left: 1px solid var(--border); }
+#sb-modes button:hover { color: var(--fg); }
+#sb-modes button.on { background: var(--sel-bg); color: var(--fg); font-weight: 600; }
+#sb-modes button .n { opacity: .7; font-weight: 400; margin-left: 3px; }
+#sb-modes button.zero .n { opacity: .4; }
 /* ---- progress: analog notches, neon when lit ----
    Every layer paints the same notch gradient and is anchored to the same left
    edge, so the ticks stay in phase however wide each layer is — the lit layers
@@ -484,6 +495,41 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
   color: var(--accent); white-space: nowrap; text-align: right; }
 #help-hint { margin-top: 10px; color: var(--fg-dim); font-size: 12px; }
 
+/* ---- commit panel ---- */
+#commit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45);
+  display: none; align-items: center; justify-content: center; z-index: 20; }
+#commit-overlay.show { display: flex; }
+#commit { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 16px 20px; width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px);
+  display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.35); }
+#commit-head { display: flex; gap: 10px; align-items: baseline; }
+#commit-head b { font-weight: 600; }
+#commit-branch { color: var(--fg-dim); font-family: var(--mono-font), monospace; font-size: 12px; }
+#commit-msgs { display: flex; flex-wrap: wrap; gap: 6px; }
+#commit-msgs button { font-size: 12px; max-width: 100%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+#commit-msgs button.on { background: var(--sel-bg); border-color: var(--accent); }
+#commit-msgs button.dirty::after { content: " •"; color: var(--mixed); }
+#commit-file { color: var(--fg-dim); font-size: 11.5px; font-family: var(--mono-font), monospace; }
+#commit-text { width: 100%; min-height: 9em; resize: vertical; background: var(--bg);
+  color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 8px;
+  font: 13px/1.45 var(--mono-font), monospace; }
+#commit-text:focus { outline: none; border-color: var(--accent); }
+#commit-sub { color: var(--fg-dim); font-size: 11.5px; }
+#commit-sub.long { color: var(--mixed); }
+#commit-staged { max-height: 9em; overflow: auto; font: 12px/1.5 var(--mono-font), monospace;
+  border-top: 1px solid var(--border); padding-top: 6px; }
+#commit-staged .st { display: inline-block; width: 1.4em; color: var(--accent); }
+#commit-staged .none, #commit-note { color: var(--mixed); }
+#commit-err { color: var(--del-sign); white-space: pre-wrap; font: 12px/1.4 var(--mono-font), monospace;
+  max-height: 10em; overflow: auto; }
+#commit-err:empty { display: none; }
+#commit-btns { display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
+#commit-btns .sp { flex: 1; color: var(--fg-dim); font-size: 11.5px; }
+#commit-go { border-color: var(--add-sign); color: var(--add-sign); }
+#commit-go:disabled { opacity: .4; cursor: default; }
+
 /* ---- confirm ---- */
 #confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45);
   display: none; align-items: center; justify-content: center; z-index: 21; }
@@ -507,6 +553,7 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
 <nav id="sidebar">
   <div id="sb-head">
     <div id="sb-title"><span class="wm-seen">seen</span><span class="wm-diff">diff</span></div>
+    <div id="sb-modes" title="what to compare (m / M)"></div>
     <div id="sb-stats">loading…</div>
     <div id="sb-progress"><span class="rev"></span><span class="seen"></span></div>
     <div id="sb-base"></div>
@@ -522,6 +569,7 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
     <span id="tb-path">no file open</span>
     <span id="tb-info"></span>
     <span id="tb-sp"></span>
+    <button id="btn-commit" title="review the proposed message and commit what's staged (c)">commit</button>
     <button id="btn-split" title="side-by-side / unified (s)">unified</button>
     <button id="btn-hide" title="hide fully-reviewed files (h)">hide ✓</button>
     <button id="btn-font" title="toggle font"></button>
@@ -580,6 +628,8 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
       <tr><td>y</td><td>copy ref + content (selection or focused block)</td></tr>
       <tr><td>Y</td><td>copy refs for all unreviewed blocks in file</td></tr>
       <tr><td>s</td><td>toggle side-by-side / unified</td></tr>
+      <tr><td>m / M</td><td>next / prev view: all · committed · staged · unstaged</td></tr>
+      <tr><td>c</td><td>commit staged changes with a proposed message (COMMIT_MSG_*.txt)</td></tr>
       <tr><td>Ctrl-F</td><td>search all changed files — ⏎ / ⇧⏎ next / prev · Esc closes</td></tr>
       <tr><td>g</td><td>focus file filter</td></tr>
       <tr><td>h</td><td>hide fully-reviewed files</td></tr>
@@ -597,6 +647,24 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
       </tbody>
     </table>
     <div id="help-hint">click a line number to copy a ref · shift-click / drag for a range</div>
+  </div>
+</div>
+<div id="commit-overlay">
+  <div id="commit" role="dialog" aria-label="Commit">
+    <div id="commit-head"><b>Commit staged changes</b><span id="commit-branch"></span></div>
+    <div id="commit-msgs"></div>
+    <div id="commit-file"></div>
+    <textarea id="commit-text" spellcheck="true"
+      placeholder="Proposed message. Lines starting with # are dropped."></textarea>
+    <div id="commit-sub"></div>
+    <div id="commit-staged"></div>
+    <div id="commit-err"></div>
+    <div id="commit-btns">
+      <span class="sp">Ctrl+S save · Ctrl+⏎ commit · Esc close</span>
+      <button id="commit-save">Save</button>
+      <button id="commit-close">Close</button>
+      <button id="commit-go">Commit</button>
+    </div>
   </div>
 </div>
 <div id="confirm-overlay">
@@ -629,6 +697,16 @@ const THEMES = ["light", "dark", "solarized-light", "solarized-dark",
 const FONTS = ["JetBrains Mono", "Ubuntu Sans Mono"];
 
 let meta = null;          // /api/files payload
+let metaRaw = "";         // its JSON text, to tell whether a poll changed anything
+/* What is compared. null until the first /api/files says the server default;
+   the hash's m= wins so a reload stays where it was. */
+let mode = new URLSearchParams(location.hash.slice(1)).get("m") || null;
+const MODES = ["all", "committed", "staged", "unstaged"];
+const MODE_SIDES = {
+  committed: "commits only",
+  staged: "HEAD → index",
+  unstaged: "index → working tree",
+};
 let file = null;          // /api/file payload for the open file
 let blocks = [];          // file.blocks + line ranges (l0/l1) and view ranges (r0/r1)
 let blockByRow = [];      // view row idx -> block index or -1
@@ -721,8 +799,12 @@ async function copyText(text, what) {
   try { await navigator.clipboard.writeText(text); toast("copied  " + what); }
   catch (e) { toast("copy manually:", text); }
 }
+/* every request names the mode: the server holds one diff per mode */
+function withMode(url) {
+  return mode ? url + (url.includes("?") ? "&" : "?") + "mode=" + mode : url;
+}
 async function api(method, url, body) {
-  const r = await fetch(url, {
+  const r = await fetch(withMode(url), {
     method,
     headers: body ? { "content-type": "application/json" } : undefined,
     body: body ? JSON.stringify(body) : undefined,
@@ -931,16 +1013,45 @@ function renderSidebar() {
   if (allDone === null) allDone = done;          // no fanfare on page load
   else if (done && !allDone) { allDone = true; celebrate(); }
   else allDone = done;
-  $("sb-base").textContent =
-    `${meta.branch || "detached"} vs ${meta.base_ref} @ ${meta.base_sha} (${meta.base_date.slice(0, 10)})`;
-  const dirty = meta.dirty_files.length, conf = meta.conflicted_files.length;
+  const base = `${meta.base_ref} @ ${meta.base_sha}`
+    + (meta.base_date ? ` (${meta.base_date.slice(0, 10)})` : "");
+  $("sb-base").textContent = `${meta.branch || "detached"}: ` + (
+    meta.mode === "all" ? `${base} → working tree`
+    : meta.mode === "committed" ? `${base} → HEAD`
+    : MODE_SIDES[meta.mode]);
+  renderModes();
+  // uncommitted work is only "not shown" in the commits-only view; the
+  // other views include it, and the tabs already count it
+  const dirty = meta.mode === "committed" ? meta.dirty_files.length : 0;
+  const conf = meta.conflicted_files.length;
   const banner = $("dirty-banner");
   if (dirty || conf) {
     banner.style.display = "block";
     banner.textContent = (dirty ? `${dirty} file${dirty > 1 ? "s" : ""} with uncommitted changes, not shown` : "")
-      + (conf ? ` · ${conf} conflicted (skipped)` : "");
-    banner.title = meta.dirty_files.concat(meta.conflicted_files).join("\n");
+      + (dirty && conf ? " · " : "")
+      + (conf ? `${conf} conflicted (skipped)` : "");
+    banner.title = (dirty ? meta.dirty_files : []).concat(meta.conflicted_files).join("\n");
   } else banner.style.display = "none";
+}
+function renderModes() {
+  const box = $("sb-modes");
+  box.textContent = "";
+  for (const m of MODES) {
+    const b = document.createElement("button");
+    const n = meta.modes ? meta.modes[m] : 0;
+    b.className = (m === meta.mode ? "on" : "") + (n ? "" : " zero");
+    b.append(m === "committed" ? "commits" : m);
+    const c = document.createElement("span"); c.className = "n"; c.textContent = n;
+    b.append(c);
+    b.title = {
+      all: "everything: committed, staged and unstaged, against the base",
+      committed: "commits on this branch only (base → HEAD)",
+      staged: "what the next commit would contain (HEAD → index)",
+      unstaged: "not yet staged, untracked files included (index → working tree)",
+    }[m] + " · m / M";
+    b.onclick = () => setMode(m);
+    box.append(b);
+  }
 }
 function bumpStats(f, dSeen, dRev, w) {
   f.seen = Math.max(0, Math.min(f.blocks, f.seen + dSeen));
@@ -956,11 +1067,95 @@ function bumpStats(f, dSeen, dRev, w) {
 
 /* ---------- file loading ---------- */
 async function loadMeta() {
-  meta = await api("GET", "/api/files");
+  const r = await fetch(withMode("/api/files"));
+  if (!r.ok && mode) {               // a stale m= in the hash: fall back
+    mode = null;
+    return loadMeta();
+  }
+  if (!r.ok) { toast("api error " + r.status); throw new Error("/api/files"); }
+  metaRaw = await r.text();
+  meta = JSON.parse(metaRaw);
+  mode = meta.mode;
   $("btn-hide").style.opacity = hideDone ? 1 : .55;
   renderSidebar();
 }
-async function openFile(path, focusLine) {
+function isKnownPath(p) {
+  return meta.files.some(f => f.path === p) || !!(wt && wt.wt_paths.includes(p));
+}
+function showEmpty() {
+  clearRows();
+  file = null; curPath = null; blocks = []; focusIdx = -1;
+  viewRows = []; viewOf = [];
+  spacer.style.height = "0px";
+  drawMinimap();
+  $("tb-path").textContent = "nothing to review";
+  $("tb-info").textContent = "";
+  let d = $("empty-msg");
+  if (!d) { d = document.createElement("div"); d.id = "empty-msg"; pane.append(d); }
+  d.textContent = {
+    all: `No changes between ${meta.base_ref} and the working tree.`,
+    committed: `No committed changes between ${meta.base_ref} and HEAD. `
+      + "Commit your work, pass a different base ref, or switch view (m).",
+    staged: "Nothing staged. git add something, or switch view (m).",
+    unstaged: "No unstaged changes. Switch view (m) to see staged or committed work.",
+  }[meta.mode];
+  renderSidebar();
+  history.replaceState(null, "", "#m=" + mode);
+}
+/* Open the best file after the list changed under us: the same path if it's
+   still here, else the first file, else the empty state. */
+async function reopen(keepScroll) {
+  if (curPath && isKnownPath(curPath)) {
+    await openFile(curPath, undefined, keepScroll ? pane.scrollTop : undefined);
+  } else if (meta.files.length) {
+    await openFile(meta.files[0].path);
+  } else if (!wt) {
+    showEmpty();
+  }
+}
+async function setMode(m) {
+  if (!MODES.includes(m) || m === mode) return;
+  flushSeen(false);                  // queued seens belong to the old mode
+  mode = m;
+  await loadMeta();
+  toast(m + " · " + meta.files.length + " file" + (meta.files.length === 1 ? "" : "s"));
+  await reopen(false);
+}
+function cycleMode(d) {
+  const i = MODES.indexOf(mode);
+  setMode(MODES[(i + d + MODES.length) % MODES.length]);
+}
+/* Live refresh. The diff isn't point-in-time any more: the working tree and
+   the index move while the tab is open (often because an agent is editing).
+   Poll the list; when it changed, re-render, and reload the open file only if
+   its own content changed — keeping the scroll position, so an edit elsewhere
+   doesn't throw the reader back to the top. */
+let metaPollBusy = false;
+async function pollMeta() {
+  if (metaPollBusy || document.hidden || !meta) return;
+  metaPollBusy = true;
+  try {
+    const want = mode;
+    const r = await fetch(withMode("/api/files"));
+    if (!r.ok || want !== mode) return;
+    const raw = await r.text();
+    if (raw === metaRaw) return;
+    flushSeen(false);
+    metaRaw = raw;
+    meta = JSON.parse(raw);
+    const cur = curPath && meta.files.find(f => f.path === curPath);
+    if (cur && file && cur.v === file.v) {
+      renderSidebar();                         // only counts or other files moved
+      return;
+    }
+    if (!curPath && !meta.files.length) { renderSidebar(); return; }
+    if (curPath && !cur && wt && wt.wt_paths.includes(curPath)) {
+      renderSidebar(); return;                 // a walkthrough-only file
+    }
+    await reopen(true);
+  } catch (e) {} finally { metaPollBusy = false; }
+}
+async function openFile(path, focusLine, keepScroll) {
   file = await api("GET", "/api/file?path=" + encodeURIComponent(path));
   curPath = path;
   selAnchor = selEnd = null; dwell.clear();
@@ -987,7 +1182,8 @@ async function openFile(path, focusLine) {
   computeOffsets();
   wtRecompute();
   runFileSearch();      // hits are line-indexed: rescan whenever the file changes
-  pane.scrollTop = focusLine
+  pane.scrollTop = keepScroll !== undefined ? keepScroll
+    : focusLine
     ? Math.max(0, offsets[viewOf[Math.min(focusLine - 1, file.lines.length - 1)]]
                   - pane.clientHeight / 3)
     : 0;
@@ -1442,13 +1638,16 @@ function flushSeen(beacon) {
   const payload = JSON.stringify({ blocks: [...seenQueue.values()] });
   seenQueue.clear();
   if (beacon && navigator.sendBeacon) {
-    navigator.sendBeacon("/api/seen", new Blob([payload], { type: "application/json" }));
+    navigator.sendBeacon(withMode("/api/seen"), new Blob([payload], { type: "application/json" }));
   } else {
-    fetch("/api/seen", { method: "POST", body: payload,
+    fetch(withMode("/api/seen"), { method: "POST", body: payload,
                          headers: { "content-type": "application/json" } });
   }
 }
-setInterval(() => { evalSeen(); flushSeen(false); wtPoll(); }, 2000);
+setInterval(() => { evalSeen(); flushSeen(false); wtPoll(); pollMeta(); }, 2000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") pollMeta();   // catch up at once
+});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") flushSeen(true);
 });
@@ -1667,10 +1866,162 @@ $("btn-hide").onclick = () => {
   renderSidebar();
 };
 
+/* ---------- commit panel ----------
+   Proposed messages are COMMIT_MSG_<description>.txt files in the repo root,
+   one per queued change; an agent writes them, the user edits and commits
+   here. Edits are kept per file as drafts until saved or committed, so
+   switching between proposals loses nothing. */
+let cState = null;          // /api/commit payload
+let cSel = null;            // selected message file name, null = unsaved new
+let cDrafts = new Map();    // name|"" -> edited text not yet on disk
+let cBusy = false;
+const commitOpen = () => $("commit-overlay").classList.contains("show");
+async function commitFetch(method, url, body) {
+  const r = await fetch(url, {
+    method, headers: { "content-type": "application/json", "x-seendiff": "1" },
+    body: JSON.stringify(body) });
+  let d = null; try { d = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error((d && d.detail) || ("error " + r.status));
+  return d;
+}
+function cMsg(name) { return cState.messages.find(m => m.name === name) || null; }
+function cKey() { return cSel || ""; }
+async function openCommit() {
+  $("commit-err").textContent = "";
+  $("commit-overlay").classList.add("show");
+  await loadCommit();
+  const ta = $("commit-text");
+  ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+function closeCommit() {
+  // keep the textarea's edit as a draft: Esc must never eat someone's typing
+  if (cState) stashDraft();
+  $("commit-overlay").classList.remove("show");
+}
+function stashDraft() {
+  const m = cMsg(cSel), text = $("commit-text").value;
+  if (m ? text !== m.text : text.trim()) cDrafts.set(cKey(), text);
+  else cDrafts.delete(cKey());
+}
+async function loadCommit() {
+  try { cState = await (await fetch("/api/commit")).json(); }
+  catch (e) { $("commit-err").textContent = "cannot load commit state"; return; }
+  if (cSel && !cMsg(cSel)) cSel = null;
+  if (cSel === null && cState.messages.length && !cDrafts.has(""))
+    cSel = cState.messages[0].name;   // oldest first: proposals queue up in order
+  renderCommit();
+}
+function selectCommitMsg(name) {
+  stashDraft();
+  cSel = name;
+  $("commit-err").textContent = "";
+  renderCommit();
+  $("commit-text").focus();
+}
+function renderCommit() {
+  $("commit-branch").textContent = cState.branch ? "on " + cState.branch : "detached HEAD";
+  const box = $("commit-msgs"); box.textContent = "";
+  for (const m of cState.messages) {
+    const b = document.createElement("button");
+    b.textContent = m.description; b.title = m.name;
+    b.className = (m.name === cSel ? "on" : "") + (cDrafts.has(m.name) ? " dirty" : "");
+    b.onclick = () => selectCommitMsg(m.name);
+    box.append(b);
+  }
+  const nb = document.createElement("button");
+  nb.textContent = "+ new"; nb.title = "write a message from scratch";
+  nb.className = (cSel === null ? "on" : "") + (cDrafts.has("") ? " dirty" : "");
+  nb.onclick = () => selectCommitMsg(null);
+  box.append(nb);
+  const m = cMsg(cSel);
+  $("commit-file").textContent = m ? m.name
+    : "not saved — Save asks for a short name and writes COMMIT_MSG_<name>.txt";
+  $("commit-text").value = cDrafts.has(cKey()) ? cDrafts.get(cKey()) : (m ? m.text : "");
+  const st = $("commit-staged"); st.textContent = "";
+  if (!cState.staged.length) {
+    const d = document.createElement("div"); d.className = "none";
+    d.textContent = "Nothing is staged. git add what this message describes, "
+      + "then reopen (c).";
+    st.append(d);
+  } else {
+    const head = document.createElement("div");
+    head.textContent = `${cState.staged.length} staged file${cState.staged.length > 1 ? "s" : ""}`
+      + (cState.unstaged ? ` · ${cState.unstaged} unstaged/untracked stay out` : "");
+    head.style.color = "var(--fg-dim)";
+    st.append(head);
+    for (const f of cState.staged) {
+      const d = document.createElement("div");
+      const s = document.createElement("span"); s.className = "st"; s.textContent = f.status;
+      d.append(s, (f.old_path ? f.old_path + " → " : "") + f.path);
+      st.append(d);
+    }
+  }
+  updateCommitSub();
+}
+/* subject-line length: the message becomes a changelog line, keep it short */
+function updateCommitSub() {
+  const lines = $("commit-text").value.split("\n").filter(l => !l.startsWith("#"));
+  const subj = (lines.find(l => l.trim()) || "").trim();
+  const body = lines.slice(lines.findIndex(l => l.trim()) + 1).some(l => l.trim());
+  const sub = $("commit-sub");
+  sub.textContent = subj ? `subject ${subj.length} chars` + (body ? " · has a body" : "") : "";
+  sub.className = subj.length > 72 ? "long" : "";
+  $("commit-go").disabled = cBusy || !subj || !cState || !cState.staged.length;
+}
+$("commit-text").addEventListener("input", () => {
+  stashDraft();
+  const b = [...$("commit-msgs").children].find(x => x.classList.contains("on"));
+  if (b) b.classList.toggle("dirty", cDrafts.has(cKey()));
+  updateCommitSub();
+});
+async function saveCommitMsg() {
+  const text = $("commit-text").value;
+  let name = cSel, m = cMsg(cSel);
+  if (!name) {
+    const d = prompt("Short description for the file name:", "");
+    if (!d || !d.trim()) return;
+    const slug = d.trim().replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+    name = "COMMIT_MSG_" + (slug || "message") + ".txt";
+    if (cMsg(name)) { $("commit-err").textContent = name + " already exists"; return; }
+  }
+  try {
+    await commitFetch("PUT", "/api/commit/message",
+                      { name, text, mtime_ns: m ? m.mtime_ns : null });
+    cDrafts.delete(cKey());
+    cSel = name;
+    $("commit-err").textContent = "";
+    await loadCommit();
+    toast("saved " + name);
+  } catch (e) { $("commit-err").textContent = e.message; }
+}
+async function doCommit() {
+  if ($("commit-go").disabled) return;
+  const text = $("commit-text").value, m = cMsg(cSel);
+  cBusy = true; updateCommitSub();
+  $("commit-err").textContent = "committing… (hooks may take a moment)";
+  try {
+    const r = await commitFetch("POST", "/api/commit",
+      { name: m ? m.name : null, text, mtime_ns: m ? m.mtime_ns : null });
+    cDrafts.delete(cKey());
+    cSel = null;
+    $("commit-err").textContent = "";
+    $("commit-overlay").classList.remove("show");
+    toast("committed " + r.commit);
+    pollMeta();
+  } catch (e) {
+    $("commit-err").textContent = e.message;
+  } finally { cBusy = false; if (cState) updateCommitSub(); }
+}
+$("btn-commit").onclick = () => openCommit();
+$("commit-close").onclick = () => closeCommit();
+$("commit-save").onclick = () => saveCommitMsg();
+$("commit-go").onclick = () => doCommit();
+$("commit-overlay").onclick = e => { if (e.target === $("commit-overlay")) closeCommit(); };
+
 /* ---------- walkthrough (CODEWALKTHROUGH.md §3) ---------- */
 async function loadWalkthrough() {
   try {
-    const r = await fetch("/api/walkthrough");
+    const r = await fetch(withMode("/api/walkthrough"));
     wtWatch = r.status !== 404;      // 404 = server started without a file
     const d = r.ok ? await r.json() : null;
     // {empty:true} is the placeholder walkthrough: plain diff, keep watching
@@ -1916,7 +2267,7 @@ async function wtPoll() {
   if (!wtWatch || wtPollBusy) return;
   wtPollBusy = true;
   try {
-    const r = await fetch("/api/walkthrough");
+    const r = await fetch(withMode("/api/walkthrough"));
     if (!r.ok) return;
     const nw = await r.json();
     if (nw.empty) { if (wt) wtClear("walkthrough dismissed"); return; }
@@ -1938,7 +2289,7 @@ async function wtPoll() {
 }
 function updateHash() {
   if (!curPath || !file) return;
-  let h = "#f=" + encodeURIComponent(curPath)
+  let h = "#m=" + mode + "&f=" + encodeURIComponent(curPath)
         + "&l=" + (firstLineOf(findRow(pane.scrollTop)) + 1);
   if (wtOn && wt && wtStep >= 0)
     h += "&w=" + encodeURIComponent(wt.steps[wtStep].id);
@@ -2136,9 +2487,9 @@ async function runGlobalSearch() {
   if (!sQuery) { renderResults(); return; }
   const q = sQuery;
   try {
-    const r = await fetch("/api/search?q=" + encodeURIComponent(q)
+    const r = await fetch(withMode("/api/search?q=" + encodeURIComponent(q)
       + "&regex=" + (sRegex ? "true" : "false")
-      + "&case=" + (/[A-Z]/.test(q) ? "true" : "false"));
+      + "&case=" + (/[A-Z]/.test(q) ? "true" : "false")));
     if (q !== sQuery) return;                 // a later keystroke won the race
     $("s-input").classList.toggle("bad", !r.ok);
     sGlobal = r.ok ? await r.json() : { total: 0, truncated: false, files: [] };
@@ -2227,6 +2578,13 @@ $("s-close").onclick = closeSearch;
 
 /* ---------- keymap (PLAN.md §12) ---------- */
 addEventListener("keydown", e => {
+  if (commitOpen()) {           // the panel owns the keyboard while it's open
+    if (e.key === "Escape") { e.preventDefault(); closeCommit(); }
+    else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
+    else if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+      e.preventDefault(); saveCommitMsg(); }
+    return;
+  }
   // before the ctrl/meta bail-out below: Ctrl+F must beat the browser's own
   // find, which can only see the handful of rows the virtualizer has rendered
   if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F")) {
@@ -2297,6 +2655,9 @@ addEventListener("keydown", e => {
   else if (k === "y") { stop(); copyRefWithContent(); }
   else if (k === "Y") { stop(); copyUnreviewedRefs(); }
   else if (k === "s") { stop(); setSplit(!split); }
+  else if (k === "c") { stop(); openCommit(); }
+  else if (k === "m") { stop(); cycleMode(1); }
+  else if (k === "M") { stop(); cycleMode(-1); }
   else if (k === "g") { stop(); $("filter").focus(); $("filter").select(); }
   else if (k === "h") { stop(); $("btn-hide").onclick(); }
   else if (k === "t") { stop(); $("btn-theme").onclick(); }
@@ -2339,20 +2700,13 @@ $("filter").addEventListener("input", renderSidebar);
   await loadMeta();
   await loadWalkthrough();
   if (!meta.files.length && !wt) {   // with a walkthrough, an empty diff is fine
-    $("tb-path").textContent = "nothing to review";
-    const d = document.createElement("div");
-    d.id = "empty-msg";
-    d.textContent = `No committed changes between ${meta.base_ref} and HEAD. `
-      + `Commit your work, or pass a different base ref.`;
-    pane.append(d);
+    showEmpty();                     // the poll fills it in when changes appear
     return;
   }
   if (wt) { renderSidebar(); renderWtOutline(); }
   const h = new URLSearchParams(location.hash.slice(1));
   const start = h.get("f");
-  const known = p => meta.files.some(f => f.path === p)
-    || (wt && wt.wt_paths.includes(p));
-  if (start && known(start)) {
+  if (start && isKnownPath(start)) {
     await openFile(start, +(h.get("l") || 0) || undefined);
   } else if (meta.files.length) {
     await openFile(meta.files[0].path);

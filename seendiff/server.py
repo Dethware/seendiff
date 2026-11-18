@@ -58,6 +58,19 @@ def prune_cache(root: Path, days: int = CACHE_PRUNE_DAYS) -> None:
 
 
 @dataclass
+class Snapshot:
+    """One mode's diff at one moment. `key` moves whenever the diff does."""
+    mode: str
+    key: str
+    files: list[G.FileDiff]
+    by_path: dict[str, G.FileDiff]
+    disk_dir: Path | None = None     # only immutable (commit → commit) diffs
+
+    def paths(self) -> set[str]:
+        return set(self.by_path)
+
+
+@dataclass
 class AppState:
     repo: str
     base_ref: str
@@ -66,18 +79,20 @@ class AppState:
     section_min: int = G.SECTION_MIN
     section_max: int = G.SECTION_MAX
     db_path: str | None = None
+    default_mode: str = G.DEFAULT_MODE
+    untracked: bool = True
 
     mb_sha: str = ""
     head_sha: str = ""
     base_date: str = ""
     branch: str | None = None
     scope: str = ""
-    files: list[G.FileDiff] = field(default_factory=list)
-    by_path: dict[str, G.FileDiff] = field(default_factory=dict)
-    dirty: list[str] = field(default_factory=list)
-    conflicted: list[str] = field(default_factory=list)
+    status: G.WorkStatus = field(default_factory=G.WorkStatus)
+    snaps: dict[str, Snapshot] = field(default_factory=dict)
     lock: Lock = field(default_factory=Lock)
-    file_cache: dict[str, dict] = field(default_factory=dict)
+    # payloads keyed by (path, fingerprint): content-addressed, so they are
+    # valid for any mode and need no invalidation, only pruning
+    file_cache: dict[tuple[str, str], dict] = field(default_factory=dict)
 
     # walkthrough mode (CODEWALKTHROUGH.md §2)
     wt_file: str | None = None                 # path of the JSON, if any
@@ -85,16 +100,32 @@ class AppState:
     wt_empty: bool = True                      # file absent/empty: plain diff
     wt_error: str | None = None                # why the latest reload failed
     wt_attempt_mtime: float = -1.0             # last mtime we tried to load
-    wt_paths: set[str] = field(default_factory=set)   # wt files not in the diff
     wt_cache: dict[tuple[str, float], dict] = field(default_factory=dict)
+
+    # ---- compatibility views onto the default mode (walkthrough, tests) ----
+    @property
+    def files(self) -> list[G.FileDiff]:
+        return self.snapshot(self.default_mode, fresh=False).files
+
+    @property
+    def by_path(self) -> dict[str, G.FileDiff]:
+        return self.snapshot(self.default_mode, fresh=False).by_path
+
+    @property
+    def dirty(self) -> list[str]:
+        return self.status.dirty
+
+    @property
+    def conflicted(self) -> list[str]:
+        return self.status.conflicted
 
     def hunk_ids(self) -> dict[str, set[str]]:
         return {p: {b.hunk_id for b in fd.blocks}
                 for p, fd in self.by_path.items()}
 
-    def _recompute_wt_paths(self) -> None:
-        self.wt_paths = (self.wt.paths() - set(self.by_path)
-                         if self.wt else set())
+    def wt_paths(self, snap: Snapshot) -> set[str]:
+        """Walkthrough files that are not in this mode's diff."""
+        return self.wt.paths() - snap.paths() if self.wt else set()
 
     def load_walkthrough(self) -> None:
         """(Re)load when the file's mtime moved; keep the last good copy.
@@ -114,7 +145,6 @@ class AppState:
         except FileNotFoundError:
             self.wt, self.wt_error, self.wt_empty = None, None, True
             self.wt_attempt_mtime = -1.0     # reload as soon as it appears
-            self._recompute_wt_paths()
             return
         except OSError as e:
             self.wt_error = f"cannot stat walkthrough: {e}"
@@ -127,38 +157,101 @@ class AppState:
             self.wt_empty = self.wt is None
             self.wt_error = None
             self.wt_cache.clear()
-            self._recompute_wt_paths()
         except W.WalkthroughError as e:
             self.wt_error = "\n".join(e.problems)
+            if self.wt is None:
+                # no last good copy to fall back on: this is a broken script,
+                # not the empty one — without this the CLI's fail-loudly check
+                # never fires and the error is silently swallowed
+                self.wt_empty = False
+
+    def _refresh_head(self) -> None:
+        """Re-derive everything keyed on HEAD, if HEAD moved."""
+        head = G.head_or_empty(self.repo)
+        if head == self.head_sha and self.mb_sha:
+            return
+        self.head_sha = head
+        try:
+            self.mb_sha = G.merge_base(self.repo, self.base_ref)
+        except G.GitError:
+            self.mb_sha = head           # unborn branch, or base_ref is HEAD
+        try:
+            self.base_date = G.commit_date(self.repo, self.mb_sha)
+        except G.GitError:
+            self.base_date = ""
+        self.branch = G.branch_name(self.repo)
+        self.scope = store.scope_key(self.repo, self.base_ref, self.branch,
+                                     self.mb_sha)
+
+    def snapshot(self, mode: str, fresh: bool = True) -> Snapshot:
+        """This mode's diff. fresh=False reuses any copy already computed.
+
+        Committed diffs are immutable per (merge base, HEAD), so they are only
+        recomputed when HEAD moves. The other modes include the index or the
+        working tree, which change under us with no HEAD move, so a fresh
+        snapshot always re-runs the (cheap, -U0) diff and keeps the previous
+        object only if the patch text came out identical.
+        """
+        with self.lock:
+            prev = self.snaps.get(mode)
+            if prev is not None and not fresh:
+                return prev
+            self._refresh_head()
+            old, new = G.mode_sides(mode, self.mb_sha, self.head_sha)
+            if mode == "committed":
+                key = f"{self.mb_sha}-{self.head_sha}"
+                if prev is not None and prev.key == key:
+                    return prev
+                raw = G.raw_diff(self.repo, old, new)
+            else:
+                raw = G.raw_diff(self.repo, old, new, self.untracked)
+                key = hashlib.sha256(
+                    f"{old}\0{new}\0{raw}".encode("utf-8", "replace")
+                ).hexdigest()[:24]
+                if prev is not None and prev.key == key:
+                    return prev
+            files = G.expand_submodules(
+                self.repo,
+                G.parse_diff(raw, old, new, self.section_min, self.section_max),
+                self.section_min, self.section_max)
+            disk = (cache_root() / f"{self.mb_sha[:12]}-{self.head_sha[:12]}"
+                    if mode == "committed" else None)
+            snap = Snapshot(mode=mode, key=key, files=files,
+                            by_path={f.path: f for f in files}, disk_dir=disk)
+            self.snaps[mode] = snap
+            self._prune_file_cache()
+            return snap
+
+    def _prune_file_cache(self) -> None:
+        live = {(f.path, f.fingerprint)
+                for sn in self.snaps.values() for f in sn.files}
+        for k in [k for k in self.file_cache if k not in live]:
+            del self.file_cache[k]
 
     def refresh(self) -> None:
-        with self.lock:
-            self.mb_sha = G.merge_base(self.repo, self.base_ref)
-            self.head_sha = G.rev_sha(self.repo)
-            self.base_date = G.commit_date(self.repo, self.mb_sha)
-            self.branch = G.branch_name(self.repo)
-            self.scope = store.scope_key(self.repo, self.base_ref, self.branch,
-                                         self.mb_sha)
-            self.files = G.expand_submodules(
-                self.repo,
-                G.identity_diff(self.repo, self.mb_sha,
-                                section_min=self.section_min,
-                                section_max=self.section_max),
-                self.section_min, self.section_max)
-            self.by_path = {f.path: f for f in self.files}
-            self.dirty, self.conflicted = G.dirty_and_conflicted(self.repo)
-            self.file_cache.clear()
-            self._recompute_wt_paths()
+        """Startup: the default mode's diff and the status."""
+        self.snapshot(self.default_mode)
+        self.poll_status()
 
-    def maybe_refresh(self) -> None:
-        # diff is immutable per (mb, head); recompute only when HEAD moved
-        if G.rev_sha(self.repo) != self.head_sha:
-            self.refresh()
-        else:
-            self.dirty, self.conflicted = G.dirty_and_conflicted(self.repo)
+    def poll_status(self) -> None:
+        self.status = G.work_status(self.repo)
 
-    def disk_cache_dir(self) -> Path:
-        return cache_root() / f"{self.mb_sha[:12]}-{self.head_sha[:12]}"
+    def mode_counts(self) -> dict[str, int]:
+        """Changed-file counts for the mode tabs, without diffing all four.
+
+        staged / unstaged come straight from `git status`; committed is cheap
+        (cached until HEAD moves); "all" is their union, which only
+        overcounts a file whose uncommitted edits exactly undo its commits.
+        """
+        committed = self.snapshot("committed").paths()
+        s = self.status
+        unstaged = set(s.unstaged) | (set(s.untracked) if self.untracked else set())
+        return {
+            "all": len(committed | set(s.staged) | unstaged),
+            "committed": len(committed),
+            "staged": len(s.staged),
+            "unstaged": len(unstaged),
+        }
 
 
 def _theme_css() -> str:
@@ -204,19 +297,28 @@ def _counts(fd: G.FileDiff, states) -> tuple[int, int, int, int, int, int]:
     return len(fd.blocks), seen, reviewed, w_tot, w_seen, w_rev
 
 
-def _build_file_payload(st: AppState, fd: G.FileDiff) -> dict:
-    """The immutable part of /api/file (rows + tokens), disk-cached."""
-    key = hashlib.sha256(fd.path.encode()).hexdigest()[:16] + ".json"
-    disk = st.disk_cache_dir() / key
-    if fd.path in st.file_cache:
-        return st.file_cache[fd.path]
-    if disk.is_file():
-        try:
-            payload = json.loads(disk.read_text())
-            st.file_cache[fd.path] = payload
-            return payload
-        except (OSError, ValueError):
-            pass
+def _build_file_payload(st: AppState, fd: G.FileDiff,
+                        snap: Snapshot | None = None) -> dict:
+    """The immutable part of /api/file (rows + tokens).
+
+    Cached in memory by (path, fingerprint) — the fingerprint hashes the
+    file's patch text, blob ids included, so it changes exactly when either
+    side does. Committed diffs are also cached on disk across runs.
+    """
+    ck = (fd.path, fd.fingerprint)
+    if ck in st.file_cache:
+        return st.file_cache[ck]
+    disk = None
+    if snap is not None and snap.disk_dir is not None:
+        key = hashlib.sha256(fd.path.encode()).hexdigest()[:16] + ".json"
+        disk = snap.disk_dir / key
+        if disk.is_file():
+            try:
+                payload = json.loads(disk.read_text())
+                st.file_cache[ck] = payload
+                return payload
+            except (OSError, ValueError):
+                pass
 
     rows = G.display_rows(st.repo, st.mb_sha, fd)
     toks = None if st.no_highlight else H.highlight_rows(rows, fd.path)
@@ -235,6 +337,7 @@ def _build_file_payload(st: AppState, fd: G.FileDiff) -> dict:
         "path": fd.path,
         "old_path": fd.old_path,
         "status": fd.status,
+        "v": fd.fingerprint,
         "lang": (H.lang_for(fd.path) or "text") if toks is not None else "text",
         "total_lines": len(rows),
         "highlighted": toks is not None,
@@ -249,12 +352,13 @@ def _build_file_payload(st: AppState, fd: G.FileDiff) -> dict:
         ],
         "lines": lines,
     }
-    st.file_cache[fd.path] = payload
-    try:
-        disk.parent.mkdir(parents=True, exist_ok=True)
-        disk.write_text(json.dumps(payload))
-    except OSError:
-        pass
+    st.file_cache[ck] = payload
+    if disk is not None:
+        try:
+            disk.parent.mkdir(parents=True, exist_ok=True)
+            disk.write_text(json.dumps(payload))
+        except OSError:
+            pass
     return payload
 
 
@@ -264,6 +368,15 @@ def line_text(line: dict) -> str:
     if toks is not None:
         return "".join(piece[1] for piece in toks)
     return line.get("text") or ""
+
+
+def _mode(st: AppState, mode: str | None) -> str:
+    if mode is None:
+        return st.default_mode
+    if mode not in G.MODES:
+        raise HTTPException(400, f"unknown mode {mode!r}; one of "
+                            + ", ".join(G.MODES))
+    return mode
 
 
 async def _json_body(request: Request) -> dict:
@@ -332,23 +445,32 @@ def create_app(st: AppState) -> FastAPI:
         return FileResponse(p, headers={"Cache-Control": "max-age=31536000"})
 
     @app.get("/api/files")
-    def api_files():
-        st.maybe_refresh()
+    def api_files(mode: str | None = None):
+        """The file list for one mode. The client polls this: it is also how
+        an open tab notices the working tree, the index or HEAD moving."""
+        mode = _mode(st, mode)
+        snap = st.snapshot(mode)
+        st.poll_status()
         states = _file_states(st, db)
         files = []
         tot = tot_seen = tot_rev = 0
         w_tot = w_seen = w_rev = 0
-        for fd in st.files:
+        for fd in snap.files:
             n, seen, rev, wt, ws, wr = _counts(fd, states)
             tot += n; tot_seen += seen; tot_rev += rev
             w_tot += wt; w_seen += ws; w_rev += wr
             files.append({
                 "path": fd.path, "old_path": fd.old_path, "status": fd.status,
+                "v": fd.fingerprint,
                 "added": fd.added, "removed": fd.removed,
                 "blocks": n, "seen": seen, "reviewed": rev,
                 "weight": wt, "seen_w": ws, "reviewed_w": wr,
             })
         return {
+            "mode": mode, "default_mode": st.default_mode,
+            "modes": st.mode_counts(),
+            "version": snap.key,
+            "repo": st.repo,
             "scope": st.scope,
             "branch": st.branch,
             "base_ref": st.base_ref,
@@ -402,10 +524,10 @@ def create_app(st: AppState) -> FastAPI:
         return payload
 
     @app.get("/api/walkthrough")
-    def api_walkthrough():
+    def api_walkthrough(mode: str | None = None):
         if not st.wt_file:
             raise HTTPException(404, "no walkthrough loaded")
-        st.maybe_refresh()
+        snap = st.snapshot(_mode(st, mode), fresh=False)
         st.load_walkthrough()
         if st.wt is None and st.wt_empty:
             # placeholder: plain diff mode, client keeps polling for a script
@@ -415,7 +537,7 @@ def create_app(st: AppState) -> FastAPI:
                 422, "walkthrough failed to load:\n" + (st.wt_error or "?"))
         out = st.wt.to_json()
         out["error"] = st.wt_error
-        out["wt_paths"] = sorted(st.wt_paths)
+        out["wt_paths"] = sorted(st.wt_paths(snap))
         return out
 
     @app.post("/api/walkthrough/dismiss")
@@ -436,13 +558,16 @@ def create_app(st: AppState) -> FastAPI:
         return {"empty": True}
 
     @app.get("/api/file")
-    def api_file(path: str):
-        fd = st.by_path.get(path)
+    def api_file(path: str, mode: str | None = None):
+        snap = st.snapshot(_mode(st, mode), fresh=False)
+        fd = snap.by_path.get(path)
         if fd is None:
-            if path in st.wt_paths:
+            st.load_walkthrough()
+            if path in st.wt_paths(snap):
                 return _worktree_payload(path)
             raise HTTPException(404, f"not in diff: {path}")
-        payload = dict(_build_file_payload(st, fd))
+        payload = dict(_build_file_payload(st, fd, snap))
+        payload["v"] = fd.fingerprint   # disk copies from older versions lack it
         states = _file_states(st, db)
         payload["blocks"] = [
             dict(bm,
@@ -454,7 +579,7 @@ def create_app(st: AppState) -> FastAPI:
 
     @app.get("/api/search")
     def api_search(q: str, regex: bool = False, case: bool = False,
-                   limit: int = SEARCH_LIMIT):
+                   limit: int = SEARCH_LIMIT, mode: str | None = None):
         """Content search across every file in the diff.
 
         The client only ever holds the open file's payload, so a whole-change
@@ -471,17 +596,17 @@ def create_app(st: AppState) -> FastAPI:
         except re.error as e:
             raise HTTPException(400, f"bad regex: {e}")
         limit = max(1, min(limit, 5000))
-        st.maybe_refresh()
+        snap = st.snapshot(_mode(st, mode), fresh=False)
         out: list[dict] = []
         total = 0
         truncated = False
-        for fd in st.files:
+        for fd in snap.files:
             if truncated:
                 break
             if not fd.has_content:
                 continue          # a PNG has no lines to match, and no payload
             hits = []
-            for i, line in enumerate(_build_file_payload(st, fd)["lines"]):
+            for i, line in enumerate(_build_file_payload(st, fd, snap)["lines"]):
                 m = rx.search(line_text(line))
                 if m is None:
                     continue
@@ -500,32 +625,33 @@ def create_app(st: AppState) -> FastAPI:
                 out.append({"path": fd.path, "matches": hits})
         return {"q": q, "total": total, "truncated": truncated, "files": out}
 
-    def _valid_blocks(items) -> list[tuple[str, str]]:
+    def _valid_blocks(items, mode: str | None) -> list[tuple[str, str]]:
+        snap = st.snapshot(_mode(st, mode), fresh=False)
         out = []
         for it in items or []:
-            fd = st.by_path.get(it.get("path", ""))
+            fd = snap.by_path.get(it.get("path", ""))
             if fd and any(b.hunk_id == it.get("hunk_id") for b in fd.blocks):
                 out.append((it["path"], it["hunk_id"]))
         return out
 
     @app.post("/api/seen")
-    async def api_seen(request: Request):
+    async def api_seen(request: Request, mode: str | None = None):
         body = await _json_body(request)
-        blocks = _valid_blocks(body.get("blocks"))
+        blocks = _valid_blocks(body.get("blocks"), mode)
         if blocks:
             store.mark_seen(db, st.scope, blocks)
         return {"marked": len(blocks)}
 
     @app.post("/api/reviewed")
-    async def api_reviewed(request: Request):
+    async def api_reviewed(request: Request, mode: str | None = None):
         body = await _json_body(request)
         if "file" in body:
-            fd = st.by_path.get(body["file"])
+            fd = st.snapshot(_mode(st, mode), fresh=False).by_path.get(body["file"])
             if fd is None:
                 raise HTTPException(404, f"not in diff: {body['file']}")
             blocks = [(fd.path, b.hunk_id) for b in fd.blocks]
         else:
-            blocks = _valid_blocks(body.get("blocks"))
+            blocks = _valid_blocks(body.get("blocks"), mode)
         if blocks:
             store.mark_reviewed(db, st.scope, blocks)
         return {"marked": len(blocks)}
@@ -542,6 +668,86 @@ def create_app(st: AppState) -> FastAPI:
         else:
             raise HTTPException(400, "need ?all=, ?file= or ?path=&hunk_id=")
         return {"ok": True}
+
+    # ---- committing: proposed message files + what is staged ----
+    def _need_action_header(request: Request) -> None:
+        # These change the repo, unlike review marks. A page on another site
+        # can POST a form to 127.0.0.1:<port> with an acceptable Host header;
+        # it cannot add a custom header without a CORS preflight, which this
+        # server never answers.
+        if request.headers.get("x-seendiff") != "1":
+            raise HTTPException(403, "missing X-Seendiff header")
+
+    def _msg_path(name) -> str:
+        if not isinstance(name, str) or not G.COMMIT_MSG_RE.fullmatch(name):
+            raise HTTPException(400, "message files are named "
+                                "COMMIT_MSG_<description>.txt")
+        return os.path.join(st.repo, name)
+
+    def _check_unchanged(path: str, mtime_ns) -> None:
+        """409 if the file moved since the client read it (an agent or the
+        IDE rewrote it): never overwrite or commit a stale copy silently."""
+        try:
+            cur = str(os.stat(path).st_mtime_ns)
+        except FileNotFoundError:
+            cur = None
+        if cur != (None if mtime_ns is None else str(mtime_ns)):
+            raise HTTPException(409, "the message file changed on disk "
+                                "since it was loaded; reload it")
+
+    @app.get("/api/commit")
+    def api_commit_state():
+        st.poll_status()
+        return {
+            "branch": st.branch,
+            "messages": G.commit_messages(st.repo),
+            "staged": G.staged_changes(st.repo),
+            "unstaged": len(st.status.unstaged) + len(st.status.untracked),
+            "conflicted": st.status.conflicted,
+        }
+
+    @app.put("/api/commit/message")
+    async def api_commit_save(request: Request):
+        _need_action_header(request)
+        body = await _json_body(request)
+        path = _msg_path(body.get("name"))
+        text = body.get("text")
+        if not isinstance(text, str) or len(text) > G.COMMIT_MSG_MAX:
+            raise HTTPException(400, "text must be a string under 64 kB")
+        _check_unchanged(path, body.get("mtime_ns"))
+        try:
+            Path(path).write_text(text, encoding="utf-8")
+            mtime_ns = str(os.stat(path).st_mtime_ns)
+        except OSError as e:
+            raise HTTPException(500, f"cannot write {body['name']}: {e}")
+        return {"name": body["name"], "mtime_ns": mtime_ns}
+
+    @app.post("/api/commit")
+    async def api_commit(request: Request):
+        _need_action_header(request)
+        body = await _json_body(request)
+        text = body.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise HTTPException(400, "empty commit message")
+        name = body.get("name")
+        path = _msg_path(name) if name is not None else None
+        if path:
+            _check_unchanged(path, body.get("mtime_ns"))
+        if not G.staged_changes(st.repo):
+            raise HTTPException(409, "nothing is staged")
+        try:
+            summary = G.commit(st.repo, text)
+        except G.GitError as e:
+            raise HTTPException(422, str(e))
+        removed = False
+        if path:
+            # the message now lives in the commit; the proposal is done
+            try:
+                os.remove(path)
+                removed = True
+            except OSError:
+                pass
+        return {"ok": True, "commit": summary, "removed": name if removed else None}
 
     @app.delete("/api/state")
     def api_reset_state():

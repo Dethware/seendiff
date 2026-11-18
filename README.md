@@ -21,8 +21,10 @@ View large diffs, while keeping track of what is seen and reviewed.
 
 <br>
 
-Your branch's full diff against `origin/master`, every changed file shown **whole**
-rather than as hunk fragments. Review state survives closing the window, and a rebase.
+Your branch's full diff against `origin/master` — commits, staged and unstaged work,
+untracked files — every changed file shown **whole** rather than as hunk fragments. The
+tab follows the working tree live. Review state survives closing the window, staging,
+committing, and a rebase.
 
 Not a merge tool: no editing, no conflict resolution, no comments. It's a reader.
 
@@ -59,16 +61,33 @@ file, no daemon. State lives in `~/.local/state/seendiff/` (pruned after 60 days
 From inside any git repo:
 
 ```bash
-seendiff                 # HEAD vs origin/master, with fallbacks
+seendiff                 # working tree vs origin/master, with fallbacks
 seendiff main            # ...or any branch, tag or SHA as the base
-seendiff HEAD~3          # just the last three commits
+seendiff HEAD~3          # the last three commits plus anything uncommitted
+seendiff --staged        # just what the next commit would contain
 seendiff --port 8700     # a fixed port instead of a free one
 ```
 
 It picks a free port, starts a localhost server and opens your browser. `Ctrl-C` to stop.
 
+Four views, switched in the sidebar or with `m` / `M`; each tab shows its file count:
+
+| view | compares | flag |
+|---|---|---|
+| **all** (default) | base → working tree | `--mode all` |
+| **commits** | base → HEAD | `--committed` |
+| **staged** | HEAD → index | `--staged` |
+| **unstaged** | index → working tree, untracked files included | `--unstaged` |
+
+The open tab polls every 2 s, so edits, `git add` and commits show up without a reload;
+only a file whose content changed is re-read, and it keeps its scroll position. Review
+state is keyed on block content, so a block you reviewed under *unstaged* is still
+reviewed once it's staged or committed. Conflicted paths are left out (it's a reader, not
+a merge tool). With no `origin/master|main` or `master|main`, the base is `HEAD`.
+
 Also `--fetch` (never implicit), `--clear` (drop this branch's review state),
-`--no-browser`, `--no-highlight`, `--no-auto-seen`, `--section-min` / `--section-max`.
+`--no-untracked`, `--no-browser`, `--no-highlight`, `--no-auto-seen`,
+`--section-min` / `--section-max`, and `--list-blocks` (print every block's `hunk_id`).
 
 ## Fully keyboard driven
 
@@ -86,10 +105,31 @@ Also `--fetch` (never implicit), `--clear` (drop this branch's review state),
 | `Ctrl-F` | search all changed files — `⏎`/`⇧⏎` next / previous |
 | `g` | focus the file filter |
 | `h` | hide fully-reviewed files |
+| `m` `M` | next / previous view: all, commits, staged, unstaged |
+| `c` | commit what's staged, with a proposed message |
 | `t` | cycle theme &nbsp;•&nbsp; `?` help &nbsp;•&nbsp; `X` reset all state |
 
 **Seen** happens on its own — a block scrolls through the viewport, it's seen.
 **Reviewed** is always deliberate.
+
+## Commit from the review
+
+`c` (or **commit** in the top bar) commits what's **staged**, with a proposed message
+you can edit first. Proposals are plain files in the repo root, one per queued change:
+`COMMIT_MSG_<description>.txt`. An agent writes one, you review the diff, then pick the
+proposal, edit it and press `Ctrl-⏎`. Lines starting with `#` are dropped, so a proposal
+can carry notes to you. The file is deleted once committed; the others stay queued.
+Edits are kept as drafts while the panel is closed, and `Ctrl-S` writes them back to the
+file. A proposal that changed on disk since you opened it is never overwritten or
+committed. seendiff leaves these files out of its diffs. Hooks run as usual, and a
+failing hook's output is shown in the panel.
+
+Outside seendiff, `git cm` does the same from a terminal. It's installed with seendiff
+(a `git-cm` console script, which git finds as `git cm`). It opens the proposal in your
+editor; `git cm <word>` picks one when several are waiting, and `git cm -l` lists them.
+For agents,
+[`contrib/claude-commit-rule.md`](contrib/claude-commit-rule.md) is a rule to add to
+`~/.claude/CLAUDE.md` so every session proposes messages this way.
 
 ## Search
 
@@ -129,6 +169,7 @@ jump acts, `.` folds the detail, `w` hides the bar, **dismiss** returns to the p
 
 ```bash
 seendiff --walkthrough .git/seendiff-walkthrough.json   # play it back
+seendiff --list-blocks                                  # hunk_ids for change refs
 seendiff --check-walkthrough path/to/wt.json            # validate, exit 0/1
 ```
 
@@ -180,6 +221,15 @@ DNS rebinding. `git fetch` runs only with `--fetch`.
 
 [`PLAN.md`](PLAN.md) is the original build brief — motivation, rejected alternatives, and
 the reasoning behind each locked decision.
+
+## Personal Arch package
+
+[`packaging/arch/`](packaging/arch/PKGBUILD) builds `seendiff-local` from this checkout's
+committed HEAD, replacing the AUR's `seendiff-git` (which builds upstream):
+
+```bash
+cd packaging/arch && makepkg -si
+```
 
 ## Development
 

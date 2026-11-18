@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 seendiff = "seendiff.cli:main"
+git-cm = "seendiff.gitcm:main"
 
 [build-system]
 requires = ["setuptools>=61"]

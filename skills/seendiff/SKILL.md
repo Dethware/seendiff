@@ -1,162 +1,190 @@
 ---
 name: seendiff
 description: >
-  Show code in seendiff — a local diff tool that can also play a scripted,
-  step-by-step explanation. Use after making a commit (offer to show the diff),
-  and when the user says "show me the diff", "explain this code / change / PR",
-  "walk me through X", or otherwise asks for a guided explanation of code in a
-  git repository.
+  Show code in seendiff — a local diff viewer that tracks which blocks the
+  user has reviewed, and can play a scripted, step-by-step explanation. Use
+  when the user says "show me the diff", "let me review this", "explain this
+  code / change / PR", "walk me through X", or otherwise asks to see or be
+  guided through code in a git repository. After finishing a change
+  (committed or not), offer it in one line.
 ---
 
 # seendiff
 
 Two jobs, one server:
 
-1. **Show the diff.** After every commit you make, offer to open it in seendiff.
-2. **Explain code.** When the user asks, write a walkthrough script into the
-   file the running server is already watching — the open tab picks it up.
+1. **Show the diff.** Committed, staged and uncommitted work, in a browser
+   tab that follows the working tree live.
+2. **Explain code.** Write a walkthrough script into the file the running
+   server is already watching; the open tab picks it up.
 
-The server is launched *once per conversation*, always with an empty
-walkthrough, so it starts as a plain diff tool and becomes a walkthrough
-the moment you have something to explain.
+## What it shows
 
-## What must be installed
+By default, **everything**: the branch's commits since the base, staged
+changes, unstaged changes and untracked files, in one diff. The UI has
+four tabs, switched with `m` / `M`:
 
-Two things, and the machine is set up once — not per repo, not per
-conversation. Pick whatever installation method suits the machine; what
-matters is that the end state below holds.
+| tab | compares | flag |
+|---|---|---|
+| all *(default)* | base → working tree | |
+| commits | base → HEAD | `--committed` |
+| staged | HEAD → index | `--staged` |
+| unstaged | index → working tree, untracked included | `--unstaged` |
 
-**1. The `seendiff` CLI.** A Python CLI (Python ≥ 3.10, plus `git`) from
-`https://github.com/acme-dot-bot/seendiff`.
+The base is `origin/master`, then `origin/main`, `master`, `main`, then
+`HEAD` if none of those exist. If the user names one, pass it as the
+positional argument. The tab polls every 2 s: edits, `git add` and new
+commits show up without a reload. Review state is keyed on block
+content, so a block reviewed under *unstaged* stays reviewed once it's
+staged or committed.
 
-End state:
+Launch with the default view unless the user asks for a specific one.
+They can switch tabs themselves.
 
-- `command -v seendiff` resolves from *any* directory, in a fresh shell, with
-  no virtualenv activated and no path prefix typed.
-- `seendiff --help` and `seendiff --check-walkthrough <file>` both run.
-- It stays working after this repo's checkout is moved or deleted — no
-  dependency on being run from inside the source tree.
+## Prerequisite
 
-**2. This skill.** The `seendiff` skill itself, installed for the user rather
-than vendored into one project.
+`seendiff` must be on `PATH`. Check with `command -v seendiff`. If it's
+missing, say so and stop. Installing software is the user's call, so
+don't install it, and don't run it from some checkout's virtualenv.
 
-End state:
+## One server per working tree
 
-- The skill is available in every conversation, in any git repo, without
-  copying files into that repo.
-- `/seendiff` (or a natural request like "show me the diff") triggers it from
-  anywhere, and it names the version installed here.
-- Updating the copy in this repo does not silently change the installed
-  skill — reinstalling is a deliberate step.
+Start at most one seendiff per working tree, and reuse it across
+conversations. Each extra process holds a port and leaves a stale tab.
 
-If either is missing you cannot do this skill's job: say so plainly, state
-which of the two is absent, and give prose instead of writing a file nobody
-can open.
+State lives in the repo's git dir. Use `git rev-parse --absolute-git-dir`,
+never a literal `.git/`: in a linked worktree (Claude Code makes these),
+`.git` is a file, not a directory.
 
-## The one instance rule
+- `$GITDIR/seendiff-port`: the port
+- `$GITDIR/seendiff-walkthrough.json`: the script, `{}` when there's
+  nothing to explain
 
-One seendiff process per conversation, on one randomized port. Never start a
-second one — the user ends up with orphaned servers and stale tabs, and every
-extra process holds a port until it's killed.
-
-State lives in two files under `.git/` (already ignored, and stable across
-your author→fix loop):
-
-- `.git/seendiff-port` — the port this conversation uses
-- `.git/seendiff-walkthrough.json` — the script, `{}` when there's nothing to
-  explain
-
-**Launch procedure** (run from the repo root):
+**Launch procedure** (from anywhere inside the working tree):
 
 ```bash
-command -v seendiff || echo MISSING
-PORT=$(cat .git/seendiff-port 2>/dev/null || shuf -i 8700-8999 -n 1)
-echo "$PORT" > .git/seendiff-port
-[ -s .git/seendiff-walkthrough.json ] || echo '{}' > .git/seendiff-walkthrough.json
-curl -sf -o /dev/null "http://127.0.0.1:$PORT/" && echo ALREADY-RUNNING
+command -v seendiff >/dev/null || echo MISSING
+GITDIR=$(git rev-parse --absolute-git-dir)
+ROOT=$(git rev-parse --show-toplevel)
+WT="$GITDIR/seendiff-walkthrough.json"
+PORT=$(cat "$GITDIR/seendiff-port" 2>/dev/null || shuf -i 8700-8999 -n 1)
+echo "$PORT" > "$GITDIR/seendiff-port"
+if curl -sf "http://127.0.0.1:$PORT/api/files" | grep -qF "\"repo\":\"$ROOT\""; then
+  echo "ALREADY-RUNNING http://127.0.0.1:$PORT/"
+else
+  # keep a script that still matches the code (resume after a crash or the
+  # next day); reset one that doesn't, or seendiff refuses to start
+  seendiff --check-walkthrough "$WT" >/dev/null 2>&1 || echo '{}' > "$WT"
+  echo "LAUNCH $PORT $WT"
+fi
 ```
 
-- `ALREADY-RUNNING` → **do not launch**. The user already has the tab; just
-  give them `http://127.0.0.1:$PORT/`.
-- Otherwise start it as a **background** Bash command — it serves until
-  stopped, so a foreground run blocks the turn until timeout:
+A walkthrough survives relaunches as long as it still validates, and the
+reader comes back to the step they left (progress is stored per script
+content). If the code has moved on so that its refs no longer resolve, the
+check resets it to `{}` and the server opens as a plain diff. If you started
+the server with a base ref, pass the same one to `--check-walkthrough`.
+
+- `MISSING`: stop (see *Prerequisite*).
+- `ALREADY-RUNNING`: **do not launch**. Give the user the URL.
+- `LAUNCH`: start it as a **background** command. It serves until
+  stopped, so a foreground run blocks the turn until it times out:
 
   ```bash
-  seendiff --walkthrough .git/seendiff-walkthrough.json --port $PORT
+  seendiff --walkthrough "$WT" --port "$PORT"
   ```
 
-  It opens the user's browser itself. If it exits immediately because the port
-  is taken by something else, pick a new random port, rewrite
-  `.git/seendiff-port`, and relaunch.
-- If `command -v seendiff` prints `MISSING`, stop — see *What must be
-  installed* above. Don't work around it with a path into some checkout's
-  virtualenv; the prerequisite is a `seendiff` that runs from anywhere.
+  It opens the browser itself. Re-run the `curl` check a second later. If
+  it still doesn't answer, read the background output. If the port was
+  taken, delete `$GITDIR/seendiff-port` and go through the procedure again.
 
-**Always pass `--walkthrough` with the empty file**, even when you have nothing
-to explain. An empty walkthrough (`{}`) is a supported state: seendiff opens in
-plain diff mode and watches the file, so a later explanation needs no relaunch
-and no new tab.
+**Always pass `--walkthrough`**, even with nothing to explain. An empty
+script (`{}`) is a supported state: seendiff opens as a plain diff and
+watches the file, so a later explanation needs no relaunch and no new tab.
 
-By default seendiff diffs the branch against `origin/master`; pass a base ref
-as a positional argument when the user names a different one.
+## Offering the diff
 
-## After a commit
+When you finish a change, offer it in one line, and don't launch unasked.
+Usually that's before anything is committed: review comes first, and the
+user may want to write the commit themselves. Don't commit just so there's
+something to show; the default view includes uncommitted work.
 
-Once you've committed, offer it in one line — don't launch unasked:
+> Done. Want to review it in seendiff?
 
-> Committed. Want to see the diff in seendiff?
+If they say yes, run the launch procedure and give them the URL. Don't
+paste a summary of the change into chat as well.
 
-If they say yes, run the launch procedure and hand over the URL. Nothing else:
-no summary of the change pasted back into chat.
+## Proposed commit messages
+
+seendiff's commit panel (`c`, or the **commit** button) commits what's
+staged, with a message the user picks and edits there. It reads proposals
+from `COMMIT_MSG_<description>.txt` files in the repo root, one file per
+queued change, so several sessions can each leave their own. To propose a
+message, write such a file: a short subject line, plus `#` lines for notes
+to the user, which are dropped on commit. Never commit for the user, and
+never stage a COMMIT_MSG file. If the user has their own rules about
+staging and commit messages, follow those. seendiff
+leaves these files out of its diffs, and committing deletes the one used.
+`git cm` does the same from a terminal.
 
 ## When the user asks you to explain something
 
 You are **read-only with respect to the repo** here. You write exactly one
-file — the walkthrough JSON — and never touch source files. Explaining code is
-not a license to "fix" it along the way, and seendiff's file cache assumes
-files don't change under an open walkthrough.
+file, the walkthrough JSON, and never touch source files. Explaining code
+is not a licence to fix it along the way. Refs are also checked once, when
+the script loads: edit a file afterwards and its steps point at the wrong
+lines.
 
-1. **Read before scripting.** Read the files whole, not grep excerpts. Find the
-   spine: the one piece of state or the one call path everything else hangs
-   off. If there isn't one, the scope is too broad — say so and propose a
-   narrower walkthrough rather than producing 40 shallow steps.
+1. **Read before scripting.** Read the files whole, not grep excerpts. Find
+   the spine: the one piece of state or the one call path everything else
+   hangs off. If there isn't one, the scope is too broad. Say so and
+   propose a narrower walkthrough rather than writing 40 shallow steps.
 2. **Outline acts first**, 3–6 of them, then fill in steps.
-3. Write the JSON to `.git/seendiff-walkthrough.json` — the same file the
-   server is watching. Do not invent a new path.
-4. **Run `seendiff --check-walkthrough .git/seendiff-walkthrough.json`** and fix
-   every diagnostic. Non-negotiable: the file will not load with any problem
-   outstanding.
-5. Make sure the server is up (launch procedure above), then give the user
-   `http://127.0.0.1:$PORT/` and a two-line summary of the arc. A tab that's
-   already open picks the script up within ~2 s — no reload needed. Do **not**
-   also paste the walkthrough prose into chat; that defeats the purpose.
-6. Revisions: rewrite the file, re-run the validator. The server re-reads it
-   live. Only relaunch if the process actually died.
+3. For a change walkthrough, get block ids from the server's own diff:
+   `seendiff --list-blocks [base]` prints `path  hunk_id  lines  +a -r`
+   for every block. Pass the same base the server was started with.
+4. Write the JSON to `$WT`, the file the server is watching. Do not invent
+   a new path.
+5. **Run `seendiff --check-walkthrough "$WT" [base]`** with the same base,
+   and fix every diagnostic. This is not optional: the file will not load
+   with any problem outstanding.
+6. Make sure the server is up (launch procedure), then give the user the
+   URL and a two-line summary of the arc. An open tab picks the script up
+   within about 2 s, with no reload. Don't paste the walkthrough prose into
+   chat as well.
+7. To revise, rewrite the file and re-run the validator. The server re-reads
+   it live. Only relaunch if the process died.
 
-The user can hit **dismiss** in the walkthrough bar to clear the script and go
-back to the plain diff — that empties the JSON file. Treat the next explanation
-as a fresh write, not a resume.
+The **dismiss** button in the walkthrough bar empties the JSON file, so
+that's how the user ends a walkthrough for good. A script that's still in
+the file when a new conversation starts may belong to earlier work: if the
+user asks for something new, overwrite it rather than build on it.
+
+Line refs are on the **working-tree** side, which is the new side of the
+*all* and *unstaged* tabs. Under *commits* or *staged*, a file with
+uncommitted edits has different line numbers, so play walkthroughs in the
+default view.
 
 ## Default walkthrough structure
 
-Unless the user asks for something else, arrange it in this order. Assume the
-reader is a competent engineer with **zero knowledge of this domain or
-codebase** — no jargon that hasn't been defined on screen, no assumed
-familiarity with the product's vocabulary.
+Unless the user asks for something else, use this order. Assume the reader
+is a competent engineer with **zero knowledge of this domain or codebase**:
+no jargon that hasn't been defined on screen, no assumed familiarity with
+the product's vocabulary.
 
-1. **Data structures first.** What is the state, what shape is it, what does
-   each field mean. Naming what's being moved around is what makes the code
-   that moves it readable.
-2. **Then the main logic, driven by one concrete example.** Pick a real input —
-   an actual file path, an actual row, an actual request — and walk *that
-   example* through the code. "A block whose text hashes to `a3f9` …" beats
-   "the block is hashed". For a change walkthrough, walk the example through
-   the *new* path and say what it used to do instead.
-3. **Then the corner cases.** Empty input, the concurrent write, the rebase,
-   the failure branch. These come last and are `depth: 1` — someone reading
-   only the main line should still get a complete, honest story.
+1. **Data structures first.** What the state is, what shape it has, what
+   each field means. Naming what's being moved around makes the code that
+   moves it readable.
+2. **Then the main logic, driven by one concrete example.** Pick a real
+   input (an actual file path, row or request) and walk *that example*
+   through the code. "A block whose text hashes to `a3f9` …" beats "the
+   block is hashed". For a change walkthrough, walk the example through the
+   *new* path and say what it used to do instead.
+3. **Then the corner cases.** Empty input, the concurrent write, the
+   rebase, the failure branch. These come last and are `depth: 1`: someone
+   reading only the main line should still get a complete, honest story.
 4. **Simple language throughout.** Short sentences. Define a term the first
-   time it appears. If a step needs a diagram to make sense, it needs to be two
+   time it appears. If a step needs a diagram to make sense, make it two
    steps instead.
 
 ## File format
@@ -187,53 +215,55 @@ familiarity with the product's vocabulary.
 }
 ```
 
-`{}` (or any document with no steps) is valid and means "no walkthrough" —
-that's what you launch with, and what the dismiss button writes back.
+`{}` (or any document with no steps) is valid and means "no walkthrough".
+That's what you launch with, and what the dismiss button writes back.
 
 Rules the validator enforces:
 
-- `lines` are 1-based, on the **working tree / new side**, `[start, end]`
-  inclusive, within the file, not inverted. Paths are repo-relative.
-- Steps must be grouped in `acts[]` order — no interleaving.
-- `depth` is 0 (main line) or 1 (skippable detail). Never 2 — if a point needs
-  three levels of nesting, it needs its own act.
-- `also[]`: at most 3 secondary refs (definition site, caller, the pinning
-  test). They render as clickable chips and gutter anchors.
-- `forward`: a step id this step promises to come back to; must exist and be
-  *after* this step. Never leave a forward reference unpaid.
-- Cap: 40 steps. Past that the scope was too big and you should have said so.
-- `ref.hunk_id` (optional, change-walkthroughs only): a seendiff block id; when
-  present it wins over line numbers and survives a rebase like review state.
+- `lines` are 1-based, on the **working tree**, `[start, end]` inclusive,
+  within the file, not inverted. Paths are repo-relative.
+- Steps must be grouped in `acts[]` order, with no interleaving.
+- `depth` is 0 (main line) or 1 (skippable detail), never 2. If a point
+  needs three levels of nesting, it needs its own act.
+- `also[]`: at most 3 secondary refs (definition site, caller, the test that
+  pins it). They render as clickable chips and gutter anchors.
+- `forward`: the id of a step that this one promises to come back to. It must
+  exist and come *after* this step. Never leave a forward reference unpaid.
+- Cap: 40 steps. Past that the scope was too big, and you should have said so.
+- `ref.hunk_id` (optional, change walkthroughs only): a block id from
+  `--list-blocks`. When present it wins over line numbers.
 
-## Scripting rules — what separates a walkthrough from a narrated `cat`
+## Scripting rules: what separates a walkthrough from a narrated `cat`
 
-- **Act 1 orients.** What is this, why does it exist, what would you lose
+- **Act 1 orients.** What this is, why it exists, what you'd lose
   without it. Two sentences, before any code.
 - **One idea per step.** 40–90 words. If a step needs "and also", it's two
   steps.
-- **Never paraphrase the code.** The reader can see it — it's on screen, syntax
-  highlighted, in context. Say what it's *for*, what the non-obvious
-  constraint was, what would break if it were written the obvious way instead.
-- **Every non-obvious decision gets a why**, including the rejected alternative
-  when it's knowable. "Content hash, not line numbers — so review state
-  survives a rebase" is a walkthrough. "Computes a hash of the block" is not.
+- **Never paraphrase the code.** The reader can see it, syntax-highlighted
+  and in context. Say what it's *for*, what the non-obvious constraint was,
+  and what would break if it were written the obvious way.
+- **Every non-obvious decision gets a why**, including the rejected
+  alternative when it's knowable. "Content hash, not line numbers, so review
+  state survives a rebase" is a walkthrough. "Computes a hash of the block"
+  is not.
 - **Main path in full before any edge case.** When an edge case can't be
   avoided early, name it in one clause and set `"forward"` to the step that
   pays it off.
-- **Refs are tight.** The smallest range that carries the idea, ≤ 25 lines.
-  Pointing at a whole 200-line function is an admission the step has no point.
+- **Refs are tight.** The smallest range that carries the idea, 25 lines at
+  most. Pointing at a whole 200-line function admits the step has no point.
   Use `also[]` for the definition site or the caller rather than widening.
-- **Line numbers are read, not remembered.** They must come from a fresh read
-  of the file in this session, not from memory or an earlier turn's output.
-  There is no drift correction: a stale number is a load failure.
-- **Close the loop.** The last step returns to the claim act 1 opened with,
-  now that it's earned.
-- For **change** walkthroughs: order by narrative, not by file or by commit.
-  Use `hunk_id` refs. Say what the change makes possible, not what it edits.
+- **Line numbers are read, not remembered.** They must come from a fresh
+  read of the file in this session, not from memory or an earlier turn's
+  output. Nothing corrects drift: a stale number is a load failure.
+- **Close the loop.** The last step returns to the claim act 1 opened
+  with, now that it's earned.
+- For **change** walkthroughs: order by narrative, not by file or by
+  commit. Use `hunk_id` refs. Say what the change makes possible, not what
+  it edits.
 
-## Anti-patterns — never do these
+## Anti-patterns: never do these
 
-Enumerating files top to bottom. Restating signatures. "This function takes a
-path and returns a list." Marketing adjectives. A step per commit. Explaining
-language features rather than this code's decisions. Launching a second
-seendiff process.
+Enumerating files top to bottom. Restating signatures. "This function takes
+a path and returns a list." Marketing adjectives. A step per commit.
+Explaining language features rather than this code's decisions. Launching a
+second seendiff process for the same working tree.

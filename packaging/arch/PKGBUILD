@@ -1,0 +1,67 @@
+# Personal build of this fork, from the committed HEAD of this checkout.
+# Not for the AUR (seendiff-git there builds upstream); installing this one
+# replaces it.
+#
+#   cd packaging/arch && makepkg -si
+#
+# Uncommitted changes are not included: commit first.
+pkgname=seendiff-local
+_pkgname=seendiff
+# Computed here rather than in pkgver(): makepkg writes a pkgver() result back
+# into this file, which is tracked in the repo it builds.
+_repo=$(git -C "${startdir:-$PWD}" rev-parse --show-toplevel)
+pkgver=$(printf "%s.r%s.g%s" \
+  "$(git -C "$_repo" show HEAD:pyproject.toml | sed -n 's/^version = "\(.*\)"/\1/p')" \
+  "$(git -C "$_repo" rev-list --count HEAD)" \
+  "$(git -C "$_repo" rev-parse --short=7 HEAD)")
+pkgrel=1
+pkgdesc="Local code diff viewer that tracks reviewed blocks (personal build of the Dethware fork)"
+arch=('any')
+url="https://github.com/Dethware/seendiff"
+license=('MIT')
+depends=('python' 'git' 'python-fastapi' 'uvicorn' 'python-unidiff' 'python-pygments')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+checkdepends=('python-pytest' 'python-httpx2')
+provides=("$_pkgname" "$_pkgname-git")
+conflicts=("$_pkgname" "$_pkgname-git")
+install="$pkgname.install"
+
+prepare() {
+  local repo=$_repo
+  if [[ -n $(git -C "$repo" status --porcelain --untracked-files=no) ]]; then
+    warning "uncommitted changes in $repo are not included; building HEAD"
+  fi
+  rm -rf "$srcdir/$_pkgname"
+  mkdir -p "$srcdir/$_pkgname"
+  git -C "$repo" archive HEAD | tar -x -C "$srcdir/$_pkgname"
+  cd "$srcdir/$_pkgname"
+  # Upstream pins an exact Pygments version; follow the system one instead.
+  sed -i 's/"pygments==[^"]*"/"pygments"/' pyproject.toml
+}
+
+build() {
+  cd "$_pkgname"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "$_pkgname"
+  PYTHONPATH="$PWD" python -m pytest -q tests
+}
+
+package() {
+  cd "$_pkgname"
+  # installs both console scripts: seendiff, and git-cm (`git cm`)
+  python -m installer --destdir="$pkgdir" dist/*.whl
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 seendiff/static/fonts/LICENSE-JetBrainsMono.txt \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE-JetBrainsMono.txt"
+  install -Dm644 seendiff/static/fonts/LICENCE-UbuntuSansMono.txt \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENCE-UbuntuSansMono.txt"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 contrib/claude-commit-rule.md \
+    "$pkgdir/usr/share/doc/$pkgname/claude-commit-rule.md"
+  # Agent skill; seendiff-local.install says how to copy it.
+  install -Dm644 skills/seendiff/SKILL.md "$pkgdir/usr/share/$_pkgname/skills/seendiff/SKILL.md"
+}
