@@ -495,6 +495,35 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
   color: var(--accent); white-space: nowrap; text-align: right; }
 #help-hint { margin-top: 10px; color: var(--fg-dim); font-size: 12px; }
 
+/* ---- image view: before / after, over the code pane ---- */
+#img-view { position: absolute; inset: 0; overflow: auto; background: var(--bg);
+  z-index: 3; padding: 12px 16px; }
+#img-view[hidden] { display: none; }
+#img-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+  font-size: 12px; color: var(--fg-dim); }
+#img-bar .sp { flex: 1; }
+#img-state.rev { color: var(--add-sign); }
+#img-zooms { display: flex; gap: 4px; }
+#img-zooms button { font-size: 11.5px; padding: 1px 7px; }
+#img-zooms button.on { background: var(--sel-bg); border-color: var(--accent); }
+#img-cards { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+.img-card { flex: 1 1 280px; min-width: 0; border: 1px solid var(--border);
+  border-radius: 6px; overflow: hidden; }
+.img-card.old { border-top: 3px solid var(--del-sign); }
+.img-card.new { border-top: 3px solid var(--add-sign); }
+.img-head { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px;
+  background: var(--bg2); font-size: 12px; }
+.img-head b { font-weight: 600; }
+.img-head .m { color: var(--fg-dim); font-family: var(--mono-font), monospace; font-size: 11.5px; }
+.img-head .m.diff { color: var(--mixed); }
+/* a checkerboard, so transparent pixels read as transparent */
+.img-body { padding: 12px; overflow: auto;
+  background: repeating-conic-gradient(color-mix(in srgb, var(--fg) 9%, var(--bg)) 0 25%,
+                                       var(--bg) 0 50%) 0 0 / 16px 16px; }
+.img-body.none { background: none; color: var(--fg-dim); font-size: 12px; }
+.img-body img { display: block; max-width: 100%; height: auto; }
+.img-body img.zoomed { max-width: none; image-rendering: pixelated; }
+
 /* ---- commit panel ---- */
 #commit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45);
   display: none; align-items: center; justify-content: center; z-index: 20; }
@@ -588,6 +617,7 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
   <div id="pane-wrap">
     <div id="pane"><div id="spacer"></div></div>
     <canvas id="minimap"></canvas>
+    <div id="img-view" hidden></div>
   </div>
   <div id="wt-bar" hidden>
     <div id="wt-resizer" title="drag to resize"></div>
@@ -1083,6 +1113,7 @@ function isKnownPath(p) {
   return meta.files.some(f => f.path === p) || !!(wt && wt.wt_paths.includes(p));
 }
 function showEmpty() {
+  $("img-view").hidden = true;
   clearRows();
   file = null; curPath = null; blocks = []; focusIdx = -1;
   viewRows = []; viewOf = [];
@@ -1175,9 +1206,14 @@ async function openFile(path, focusLine, keepScroll) {
   if (focusIdx < 0) focusIdx = blocks.length ? 0 : -1;
 
   $("tb-path").textContent = (file.old_path ? file.old_path + " → " : "") + path;
-  $("tb-info").textContent = `${file.total_lines} lines · ${file.lang}`
-    + (file.skip_reason ? ` · plain (${file.skip_reason})` : "")
-    + (file.status !== "modified" ? ` · ${file.status}` : "");
+  $("tb-info").textContent = file.image
+    ? `image · ${file.image.type.replace("image/", "")}`
+      + (file.image.old === null ? " · added" : file.image.new === null ? " · deleted" : "")
+      + (file.status === "renamed" ? " · renamed" : "")
+    : `${file.total_lines} lines · ${file.lang}`
+      + (file.skip_reason ? ` · plain (${file.skip_reason})` : "")
+      + (file.status !== "modified" ? ` · ${file.status}` : "");
+  if (file.image) showImageView(); else $("img-view").hidden = true;
   measureMetrics();
   computeOffsets();
   wtRecompute();
@@ -1343,6 +1379,7 @@ function findRow(y) {           // last row whose top <= y
 /* ---------- virtualized rendering ---------- */
 let rowEls = new Map();  // rowIdx -> element
 function renderRows() {
+  if (file && file.image) { renderImgState(); return; }
   if (!file || !viewRows.length) return;
   const first = Math.max(0, findRow(pane.scrollTop) - 30);
   const last = Math.min(viewRows.length - 1,
@@ -1645,6 +1682,25 @@ function flushSeen(beacon) {
   }
 }
 setInterval(() => { evalSeen(); flushSeen(false); wtPoll(); pollMeta(); }, 2000);
+
+/* ---------- presence ----------
+   The server exits a few seconds after its last tab is gone (server.py
+   Presence). Each page load is one client: hello now and every 15 s, bye on
+   pagehide. A page restored from the back/forward cache says hello again. */
+const CLIENT_ID = (crypto.randomUUID && crypto.randomUUID())
+  || (Math.random().toString(36).slice(2) + Date.now().toString(36));
+function sayHello() {
+  fetch("/api/hello", { method: "POST", keepalive: true,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: CLIENT_ID }) }).catch(() => {});
+}
+sayHello();
+setInterval(sayHello, 15000);
+addEventListener("pagehide", () => {
+  navigator.sendBeacon("/api/bye",
+    new Blob([JSON.stringify({ id: CLIENT_ID })], { type: "application/json" }));
+});
+addEventListener("pageshow", e => { if (e.persisted) sayHello(); });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") pollMeta();   // catch up at once
 });
@@ -1865,6 +1921,97 @@ $("btn-hide").onclick = () => {
   $("btn-hide").style.opacity = hideDone ? 1 : .55;
   renderSidebar();
 };
+
+/* ---------- image view ----------
+   An image has no rows: its one whole-file block ("*") is what R / f mark,
+   and the pane is covered by before/after pictures fetched from /api/blob.
+   The file's fingerprint goes in the URL, so a changed image is refetched
+   and an unchanged one comes from the browser cache. */
+let imgZoom = "fit";
+const IMG_ZOOMS = ["fit", "2×", "4×", "8×"];
+function fmtBytes(n) {
+  return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " kB"
+       : (n / 1048576).toFixed(1) + " MB";
+}
+function showImageView() {
+  const v = $("img-view");
+  v.textContent = ""; v.hidden = false; v.scrollTop = 0;
+  const bar = document.createElement("div"); bar.id = "img-bar";
+  const state = document.createElement("span"); state.id = "img-state";
+  const sp = document.createElement("span"); sp.className = "sp";
+  const zooms = document.createElement("span"); zooms.id = "img-zooms";
+  for (const z of IMG_ZOOMS) {
+    const b = document.createElement("button");
+    b.textContent = z; b.title = z === "fit" ? "natural size, shrunk to fit" : "scale both sides " + z;
+    b.onclick = () => { imgZoom = z; applyImgZoom(); };
+    zooms.append(b);
+  }
+  bar.append(state, sp, zooms);
+  const cards = document.createElement("div"); cards.id = "img-cards";
+  const dims = {};
+  const path = curPath, info = file.image;
+  for (const [side, label] of [["old", "before"], ["new", "after"]]) {
+    const card = document.createElement("div"); card.className = "img-card " + side;
+    const head = document.createElement("div"); head.className = "img-head";
+    const b = document.createElement("b"); b.textContent = label;
+    const m = document.createElement("span"); m.className = "m";
+    head.append(b, m);
+    const body = document.createElement("div"); body.className = "img-body";
+    if (info[side] === null) {
+      body.classList.add("none");
+      body.textContent = side === "old" ? "none: the image is new" : "none: the image was deleted";
+    } else {
+      m.textContent = fmtBytes(info[side]);
+      const img = document.createElement("img");
+      img.alt = label; img.dataset.side = side;
+      img.onload = () => {
+        if (curPath !== path) return;
+        dims[side] = [img.naturalWidth, img.naturalHeight];
+        m.textContent = `${img.naturalWidth}×${img.naturalHeight} · ${fmtBytes(info[side])}`;
+        markImgDiffs(dims);
+        applyImgZoom();
+      };
+      img.onerror = () => { m.textContent = "cannot display " + info.type; };
+      img.src = withMode("/api/blob?path=" + encodeURIComponent(path)
+                         + "&side=" + side + "&v=" + encodeURIComponent(file.v || ""));
+      body.append(img);
+    }
+    card.append(head, body);
+    cards.append(card);
+  }
+  v.append(bar, cards);
+  applyImgZoom();
+  renderImgState();
+  // looking at the pictures is seeing them: same dwell rule as rows (§6)
+  if (meta.auto_seen) setTimeout(() => {
+    const b = blocks[0];
+    if (curPath === path && file && file.image && b && !b.seen && !b.reviewed
+        && document.hasFocus()) markSeen(b);
+  }, 800);
+}
+/* sizes that changed between the sides are worth a glance */
+function markImgDiffs(dims) {
+  if (!dims.old || !dims.new) return;
+  const sameDims = dims.old[0] === dims.new[0] && dims.old[1] === dims.new[1];
+  for (const m of document.querySelectorAll("#img-cards .img-head .m"))
+    m.classList.toggle("diff", !sameDims);
+}
+function applyImgZoom() {
+  for (const b of document.querySelectorAll("#img-zooms button"))
+    b.classList.toggle("on", b.textContent === imgZoom);
+  const n = imgZoom === "fit" ? 0 : parseInt(imgZoom, 10);
+  for (const img of document.querySelectorAll("#img-cards img")) {
+    img.classList.toggle("zoomed", !!n);
+    img.style.width = n && img.naturalWidth ? img.naturalWidth * n + "px" : "";
+  }
+}
+function renderImgState() {
+  const el = $("img-state"), b = blocks[0];
+  if (!el) return;
+  el.textContent = !b ? "" : b.reviewed ? "✓ reviewed · R to undo"
+    : (b.seen ? "seen · " : "") + "R to mark reviewed";
+  el.classList.toggle("rev", !!(b && b.reviewed));
+}
 
 /* ---------- commit panel ----------
    Proposed messages are COMMIT_MSG_<description>.txt files in the repo root,

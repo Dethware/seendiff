@@ -5,6 +5,7 @@ import argparse
 import socket
 import sys
 import threading
+import time
 import webbrowser
 
 import uvicorn
@@ -54,6 +55,9 @@ def main(argv: list[str] | None = None) -> int:
                     "at the nearest seam in the code")
     ap.add_argument("--port", type=int, default=None)
     ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--keep-running", action="store_true",
+                    help="keep serving after the last browser tab closes "
+                    "(by default seendiff exits a few seconds after it)")
     ap.add_argument("--walkthrough", metavar="PATH", default=None,
                     help="open a walkthrough JSON in walkthrough mode")
     ap.add_argument("--check-walkthrough", metavar="PATH", default=None,
@@ -150,8 +154,23 @@ def main(argv: list[str] | None = None) -> int:
           f"(merge base {st.mb_sha[:12]}), showing {args.mode} — {url}")
     if not args.no_browser:
         threading.Timer(0.6, webbrowser.open, args=(url,)).start()
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    server = uvicorn.Server(uvicorn.Config(
+        app, host="127.0.0.1", port=port, log_level="warning"))
+    if not args.keep_running:
+        threading.Thread(target=_exit_when_idle, args=(st, server),
+                         daemon=True).start()
+    server.run()
     return 0
+
+
+def _exit_when_idle(st: AppState, server: uvicorn.Server) -> None:
+    """Stop the server once every tab that connected has gone (Presence)."""
+    while not server.should_exit:
+        if st.presence.idle():
+            print("seendiff: last browser tab closed, exiting", file=sys.stderr)
+            server.should_exit = True
+            return
+        time.sleep(1)
 
 
 if __name__ == "__main__":

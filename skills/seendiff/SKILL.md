@@ -52,6 +52,10 @@ don't install it, and don't run it from some checkout's virtualenv.
 Start at most one seendiff per working tree, and reuse it across
 conversations. Each extra process holds a port and leaves a stale tab.
 
+The server exits a few seconds after the user closes its last tab, so
+finding it gone is normal: it means the user is done looking, not that
+something broke. Run the launch procedure again when it's next needed.
+
 State lives in the repo's git dir. Use `git rev-parse --absolute-git-dir`,
 never a literal `.git/`: in a linked worktree (Claude Code makes these),
 `.git` is a file, not a directory.
@@ -148,12 +152,12 @@ lines.
 5. **Run `seendiff --check-walkthrough "$WT" [base]`** with the same base,
    and fix every diagnostic. This is not optional: the file will not load
    with any problem outstanding.
-6. Make sure the server is up (launch procedure), then give the user the
-   URL and a two-line summary of the arc. An open tab picks the script up
-   within about 2 s, with no reload. Don't paste the walkthrough prose into
+6. Make sure the server is up (launch procedure; the user may have closed
+   the tab since), then give the user the URL and a two-line summary of the
+   arc. An open tab picks the script up within about 2 s, with no reload. Don't paste the walkthrough prose into
    chat as well.
 7. To revise, rewrite the file and re-run the validator. The server re-reads
-   it live. Only relaunch if the process died.
+   it live. Only relaunch if the server is gone.
 
 The **dismiss** button in the walkthrough bar empties the JSON file, so
 that's how the user ends a walkthrough for good. A script that's still in

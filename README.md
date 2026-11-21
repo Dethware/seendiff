@@ -68,7 +68,9 @@ seendiff --staged        # just what the next commit would contain
 seendiff --port 8700     # a fixed port instead of a free one
 ```
 
-It picks a free port, starts a localhost server and opens your browser. `Ctrl-C` to stop.
+It picks a free port, starts a localhost server and opens your browser. Close the tab and
+it exits a few seconds later (a reload doesn't count); `--keep-running` keeps it serving,
+and `Ctrl-C` always stops it.
 
 Four views, switched in the sidebar or with `m` / `M`; each tab shows its file count:
 
@@ -111,6 +113,14 @@ Also `--fetch` (never implicit), `--clear` (drop this branch's review state),
 
 **Seen** happens on its own — a block scrolls through the viewport, it's seen.
 **Reviewed** is always deliberate.
+
+## Images
+
+Changed PNG, JPEG, GIF, WebP, BMP, ICO and AVIF files show as pictures, before and after
+side by side on a checkerboard, with dimensions and file size (a changed size is
+highlighted). **fit / 2× / 4× / 8×** scales both sides together, pixel-sharp, for icons.
+An image is one block: `R` or `f` reviews it. SVG stays a text diff, since its source is
+what you'd review.
 
 ## Commit from the review
 

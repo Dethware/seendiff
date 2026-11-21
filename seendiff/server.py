@@ -35,6 +35,7 @@ _ALLOWED_HOSTS = {"localhost", "127.0.0.1", "[::1]"}
 if os.environ.get("SEENDIFF_ALLOW_HOST"):        # test/dev escape hatch only
     _ALLOWED_HOSTS.add(os.environ["SEENDIFF_ALLOW_HOST"])
 CACHE_PRUNE_DAYS = 30
+BLOB_LIMIT = 50_000_000  # bytes an image side may have before /api/blob refuses
 SEARCH_LIMIT = 500       # hits returned by /api/search before it gives up
 
 
@@ -55,6 +56,55 @@ def prune_cache(root: Path, days: int = CACHE_PRUNE_DAYS) -> None:
                 d.rmdir()
         except OSError:
             pass
+
+
+class Presence:
+    """Which browser tabs are open, so the server can exit with the last one.
+
+    A tab says hello when it loads and every PING seconds after, and bye on
+    pagehide (a beacon, which survives the tab closing). The server is idle
+    once it has seen at least one tab, none is left, and GRACE seconds have
+    passed — long enough for a reload to say hello again. A tab that dies
+    without a bye (browser crash, quit) counts as gone after STALE seconds of
+    silence; that bound has to outlast Chrome's throttling of hidden tabs,
+    which can slow a 15 s timer to once a minute.
+
+    The clock is monotonic, which on Linux stops while the machine sleeps, so
+    a laptop lid doesn't look like every tab going silent.
+    """
+    GRACE = 8.0
+    STALE = 150.0
+
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.lock = Lock()
+        self.clients: dict[str, float] = {}
+        self.armed = False             # nothing to wait for until a tab shows up
+        self.empty_since: float | None = None
+
+    def hello(self, cid: str) -> None:
+        with self.lock:
+            self.clients[cid] = self.clock()
+            self.armed = True
+            self.empty_since = None
+
+    def bye(self, cid: str) -> None:
+        with self.lock:
+            if self.clients.pop(cid, None) is not None and not self.clients:
+                self.empty_since = self.clock()
+
+    def idle(self) -> bool:
+        with self.lock:
+            now = self.clock()
+            stale = [c for c, t in self.clients.items() if now - t > self.STALE]
+            for c in stale:
+                del self.clients[c]
+            if stale and not self.clients:
+                # silent for STALE already: no reload is coming, don't wait again
+                self.empty_since = now - self.GRACE
+            return (self.armed and not self.clients
+                    and self.empty_since is not None
+                    and now - self.empty_since >= self.GRACE)
 
 
 @dataclass
@@ -81,6 +131,7 @@ class AppState:
     db_path: str | None = None
     default_mode: str = G.DEFAULT_MODE
     untracked: bool = True
+    presence: Presence = field(default_factory=Presence)
 
     mb_sha: str = ""
     head_sha: str = ""
@@ -214,7 +265,10 @@ class AppState:
                 self.repo,
                 G.parse_diff(raw, old, new, self.section_min, self.section_max),
                 self.section_min, self.section_max)
-            disk = (cache_root() / f"{self.mb_sha[:12]}-{self.head_sha[:12]}"
+            # the v prefix is the payload format: bump it when payloads change
+            # shape, or runs of an older version serve their stale copies
+            disk = (cache_root()
+                    / f"v2-{self.mb_sha[:12]}-{self.head_sha[:12]}"
                     if mode == "committed" else None)
             snap = Snapshot(mode=mode, key=key, files=files,
                             by_path={f.path: f for f in files}, disk_dir=disk)
@@ -342,6 +396,7 @@ def _build_file_payload(st: AppState, fd: G.FileDiff,
         "total_lines": len(rows),
         "highlighted": toks is not None,
         "skip_reason": skip_reason,
+        "image": _image_meta(st, fd),
         "block_meta": [
             {"hunk_id": b.hunk_id,
              "start": b.new_start if b.runs else 1,
@@ -360,6 +415,24 @@ def _build_file_payload(st: AppState, fd: G.FileDiff,
         except OSError:
             pass
     return payload
+
+
+def _image_meta(st: AppState, fd: G.FileDiff) -> dict | None:
+    """For an image file: its type, and each side's size in bytes (None where
+    the side doesn't exist). The client fetches the pictures from /api/blob."""
+    mime = G.image_type(fd.path)
+    if mime is None or fd.status not in ("binary", "renamed", "meta"):
+        return None
+    sizes: dict[str, int | None] = {}
+    for name, where in G.diff_sides(fd, st.repo).items():
+        if where is None:
+            sizes[name] = None
+            continue
+        try:
+            sizes[name] = len(G.show_side_bytes(*where, BLOB_LIMIT))
+        except G.GitError:
+            sizes[name] = None
+    return {"type": mime, "old": sizes["old"], "new": sizes["new"]}
 
 
 def line_text(line: dict) -> str:
@@ -418,6 +491,25 @@ def create_app(st: AppState) -> FastAPI:
                             f"<style>{theme_css}</style>", 1)
         return Response(html, media_type="text/html",
                         headers={"Cache-Control": "no-store"})
+
+    def _client_id(body: dict) -> str:
+        cid = body.get("id")
+        if not isinstance(cid, str) or not 8 <= len(cid) <= 64:
+            raise HTTPException(400, "id must be a string of 8–64 characters")
+        return cid
+
+    @app.post("/api/hello")
+    async def api_hello(request: Request):
+        """A tab is open (sent on load and as a heartbeat)."""
+        st.presence.hello(_client_id(await _json_body(request)))
+        return {"ok": True}
+
+    @app.post("/api/bye")
+    async def api_bye(request: Request):
+        """A tab closed or navigated away (sendBeacon on pagehide). Only a
+        known random id is removed, so a stray POST can't end the server."""
+        st.presence.bye(_client_id(await _json_body(request)))
+        return {"ok": True}
 
     @app.get("/api/prefs")
     def api_prefs_get():
@@ -576,6 +668,34 @@ def create_app(st: AppState) -> FastAPI:
             for bm in payload.pop("block_meta")
         ]
         return payload
+
+    @app.get("/api/blob")
+    def api_blob(path: str, side: str, mode: str | None = None):
+        """One side of an image in the diff, as raw bytes.
+
+        Only for files whose extension is an image type: this serves file
+        content verbatim, and a page navigated to it should never execute
+        anything (the sandbox CSP and nosniff are belt and braces; the client
+        only ever loads these through <img>). Cacheable forever: the client
+        puts the file's fingerprint in the URL.
+        """
+        snap = st.snapshot(_mode(st, mode), fresh=False)
+        fd = snap.by_path.get(path)
+        mime = G.image_type(path)
+        if fd is None or mime is None or side not in ("old", "new"):
+            raise HTTPException(404, f"no image side {side!r} for {path}")
+        where = G.diff_sides(fd, st.repo)[side]
+        if where is None:
+            raise HTTPException(404, f"{path} has no {side} side")
+        try:
+            data = G.show_side_bytes(*where, BLOB_LIMIT)
+        except G.GitError as e:
+            raise HTTPException(404, str(e))
+        return Response(data, media_type=mime, headers={
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "X-Content-Type-Options": "nosniff",
+        })
 
     @app.get("/api/search")
     def api_search(q: str, regex: bool = False, case: bool = False,

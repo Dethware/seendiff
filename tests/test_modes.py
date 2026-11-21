@@ -308,3 +308,72 @@ def test_mtime_stamps_survive_a_javascript_round_trip(client, repo):
     assert isinstance(m["mtime_ns"], str)
     body = {"name": m["name"], "text": "X\n", "mtime_ns": m["mtime_ns"]}
     assert client.post("/api/commit", headers=H, json=body).status_code == 200
+
+
+# ------------------------------------------------------------- presence
+
+class _Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_presence_waits_for_a_first_tab():
+    from seendiff.server import Presence
+    clk = _Clock()
+    p = Presence(clock=clk)
+    clk.t += 10_000
+    assert not p.idle()                       # no tab has ever connected
+
+
+def test_presence_exits_after_the_last_tab_and_grace():
+    from seendiff.server import Presence
+    clk = _Clock()
+    p = Presence(clock=clk)
+    p.hello("tab-aaaaaa")
+    p.hello("tab-bbbbbb")
+    p.bye("tab-aaaaaa")
+    clk.t += 60
+    p.hello("tab-bbbbbb")                     # heartbeat
+    assert not p.idle()                       # one tab still open
+    p.bye("tab-bbbbbb")
+    clk.t += Presence.GRACE - 1
+    assert not p.idle()
+    clk.t += 2
+    assert p.idle()
+
+
+def test_presence_reload_within_grace_keeps_running():
+    from seendiff.server import Presence
+    clk = _Clock()
+    p = Presence(clock=clk)
+    p.hello("old-page-id")
+    p.bye("old-page-id")
+    clk.t += 1
+    p.hello("new-page-id")
+    clk.t += Presence.GRACE * 3
+    assert not p.idle()
+
+
+def test_presence_unknown_bye_is_ignored_and_silent_tabs_expire():
+    from seendiff.server import Presence
+    clk = _Clock()
+    p = Presence(clock=clk)
+    p.hello("real-tab-id")
+    p.bye("forged-id-xx")
+    assert not p.idle()
+    clk.t += Presence.STALE - 1
+    assert not p.idle()
+    clk.t += 2                                # crashed: no bye, no heartbeat
+    assert p.idle()
+
+
+def test_hello_and_bye_endpoints(client):
+    assert client.post("/api/hello", json={"id": "short"}).status_code == 400
+    assert client.post("/api/hello", json={"id": "a-page-id-123"}).status_code == 200
+    # bye arrives as a beacon: text/plain body
+    r = client.post("/api/bye", content=b'{"id": "a-page-id-123"}',
+                    headers={"content-type": "text/plain"})
+    assert r.status_code == 200

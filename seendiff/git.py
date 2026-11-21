@@ -219,6 +219,53 @@ def show_side(repo: str, side: str, path: str) -> str:
     return show_file(repo, side, path)
 
 
+def show_side_bytes(repo: str, side: str, path: str, limit: int) -> bytes:
+    """A file's raw bytes on one side of a diff (images): no decoding."""
+    if side == WORKTREE:
+        try:
+            with open(os.path.join(repo, path), "rb") as f:
+                data = f.read(limit + 1)
+        except OSError as e:
+            raise GitError(f"cannot read {path}: {e}")
+    else:
+        spec = f":{path}" if side == INDEX else f"{side}:{path}"
+        proc = subprocess.run(["git", "-C", repo, "show", spec],
+                              capture_output=True, env=_env())
+        if proc.returncode != 0:
+            raise GitError(f"git show {spec} failed: "
+                           + proc.stderr.decode("utf-8", "replace").strip())
+        data = proc.stdout
+    if len(data) > limit:
+        raise GitError(f"{path} is larger than {limit // 1_000_000} MB")
+    return data
+
+
+# Shown as pictures instead of rows. SVG is left out on purpose: git diffs it
+# as text, and its source is what a reviewer needs to read.
+IMAGE_TYPES = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    ".ico": "image/x-icon", ".avif": "image/avif",
+}
+
+
+def image_type(path: str) -> str | None:
+    return IMAGE_TYPES.get(os.path.splitext(path)[1].lower())
+
+
+def diff_sides(fd: "FileDiff", repo: str) -> dict[str, tuple[str, str, str] | None]:
+    """{"old"|"new": (repo, side, path) or None} — where each side's bytes live,
+    submodule inner files included."""
+    if fd.sub:
+        r, old, new = fd.sub.repo, fd.sub.old, fd.sub.new
+        old_path, new_path = fd.sub.old_rel or fd.sub.rel, fd.sub.rel
+    else:
+        r, old, new = repo, fd.old_side, fd.new_side
+        old_path, new_path = fd.old_path or fd.path, fd.path
+    return {"old": (r, old, old_path) if fd.has_old else None,
+            "new": (r, new, new_path) if fd.has_new else None}
+
+
 @contextlib.contextmanager
 def _untracked_index(repo: str):
     """Env for a git call that should see untracked files as new files.
@@ -365,6 +412,10 @@ class FileDiff:
     new_side: str = "HEAD"
     # hash of this file's patch text: changes iff either side's content does
     fingerprint: str = ""
+    # which sides exist: an added file has no old one, a deleted no new one.
+    # status can't carry this for binaries, which are all just "binary".
+    has_old: bool = True
+    has_new: bool = True
 
     @property
     def has_content(self) -> bool:
@@ -563,6 +614,7 @@ def parse_diff(out: str, old: str, new: str,
             removed=pf.removed or 0,
             blocks=blocks,
             old_side=old, new_side=new,
+            has_old=not pf.is_added_file, has_new=not pf.is_removed_file,
             fingerprint=hashlib.sha256(
                 str(pf).encode("utf-8", "replace")).hexdigest()[:16],
         )
@@ -816,6 +868,10 @@ def display_rows(repo: str, mb_sha: str, fd: FileDiff) -> list[Row]:
     rev = fd.sub.new if fd.sub else fd.new_side
     rel = fd.sub.rel if fd.sub else fd.path
 
+    if fd.status == "binary" or (not fd.runs and image_type(fd.path)):
+        # no lines to show; decoding a PNG as text only produces noise (images,
+        # renamed ones included, get their own view from the raw bytes)
+        return []
     if fd.status == "submodule":
         # a gitlink has no blob to read: the pointer lines are the whole file
         rows = _rows_from_runs(fd.runs, "", fd.path)
