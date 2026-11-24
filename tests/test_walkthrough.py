@@ -1,4 +1,4 @@
-"""Validator tests (CODEWALKTHROUGH.md phase 1). Run:
+"""Validator tests (DEVELOPMENT.md, "Walkthroughs"). Run:
     .venv/bin/python -m unittest tests.test_walkthrough -v
 The committed example doubles as the good-path fixture.
 """

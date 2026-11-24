@@ -1,4 +1,4 @@
-"""CLI entry: argparse, free port, browser open, uvicorn (PLAN.md §3)."""
+"""CLI entry: argparse, free port, browser open, uvicorn."""
 from __future__ import annotations
 
 import argparse

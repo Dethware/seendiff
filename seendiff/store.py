@@ -1,4 +1,5 @@
-"""SQLite review state. One table, no ORM, no migrations (PLAN.md §7)."""
+"""SQLite review state and prefs. No ORM, no migrations (DEVELOPMENT.md,
+"Review state")."""
 from __future__ import annotations
 
 import os
@@ -34,7 +35,7 @@ def default_db_path() -> str:
 
 
 def scope_key(repo: str, base_ref: str, branch: str | None, mb_sha: str) -> str:
-    # symbolic on purpose: survives rebases (PLAN.md §5)
+    # symbolic on purpose: survives rebases (DEVELOPMENT.md, "Review state")
     return f"{repo}|{base_ref}|{branch or mb_sha}"
 
 
@@ -91,7 +92,7 @@ def unmark_reviewed(db: sqlite3.Connection, scope: str,
                     blocks: list[tuple[str, str]] | None = None,
                     path: str | None = None,
                     all_: bool = False) -> None:
-    """Demote to seen (reviewed_at -> NULL); seen_at stays (PLAN.md §6)."""
+    """Demote to seen (reviewed_at -> NULL); seen_at stays."""
     with db:
         if all_:
             db.execute("UPDATE block_state SET reviewed_at=NULL WHERE scope=?",

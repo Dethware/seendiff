@@ -1,4 +1,4 @@
-"""Walkthrough loading, validation and ref resolution (CODEWALKTHROUGH.md §2).
+"""Walkthrough loading, validation and ref resolution (DEVELOPMENT.md, "Walkthroughs").
 
 Pure: no FastAPI, no globals. The input is machine-generated, so validation
 fails loudly and completely — every problem is collected and reported, never

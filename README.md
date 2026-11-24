@@ -110,6 +110,7 @@ Also `--fetch` (never implicit), `--clear` (drop this branch's review state),
 | `g` | focus the file filter |
 | `h` | hide fully-reviewed files |
 | `m` `M` | next / previous view: all, commits, staged, unstaged |
+| `s` | side-by-side / unified |
 | `c` | commit what's staged, with a proposed message |
 | `t` | cycle theme &nbsp;•&nbsp; `?` help &nbsp;•&nbsp; `X` reset all state |
 
@@ -144,12 +145,11 @@ file. A proposal that changed on disk since you opened it is never overwritten o
 committed. seendiff leaves these files out of its diffs. Hooks run as usual, and a
 failing hook's output is shown in the panel.
 
-Outside seendiff, `git cm` does the same from a terminal. It's installed with seendiff
-(a `git-cm` console script, which git finds as `git cm`). It opens the proposal in your
-editor; `git cm <word>` picks one when several are waiting, and `git cm -l` lists them.
-For agents,
-[`contrib/claude-commit-rule.md`](contrib/claude-commit-rule.md) is a rule to add to
-`~/.claude/CLAUDE.md` so every session proposes messages this way.
+Outside seendiff, `git cm` does the same from a terminal; it's installed with seendiff.
+It opens the proposal in your editor; `git cm <word>` picks one when several are
+waiting, `git cm -l` lists them, and anything after `--` goes to `git commit`.
+To have your coding agent propose messages this way in every session, add
+[the commit rule](contrib/claude-commit-rule.md) to your `~/.claude/CLAUDE.md`.
 
 ## Search
 
@@ -159,15 +159,14 @@ as you type, keeping their syntax colour, and ticked on the minimap.
 ![search](docs/img/search.png)
 
 Queries are literal and smart-cased — all-lowercase matches any case, any capital makes it
-case-sensitive. `.*` toggles regex. Removed lines are searchable too. The browser's own
-find can't help: the code pane is virtualized, so only on-screen rows exist in the DOM.
+case-sensitive. `.*` toggles regex. Removed lines are searchable too. Use this rather
+than the browser's own find, which only sees the rows on screen.
 
 ## Themes
 
 `t` cycles six — **light**, **dark**, **solarized-light**, **solarized-dark**, **space**,
 **hailmary** — each with a matching Pygments palette, so syntax colours change with the
-chrome. Theme, font, layout and sidebar width persist server-side, because every run gets
-a fresh port and `localStorage` is scoped per origin.
+chrome. Theme, font, layout and sidebar width are remembered across runs.
 
 ## Code walkthrough skill
 
@@ -193,73 +192,19 @@ seendiff --list-blocks                                  # hunk_ids for change re
 seendiff --check-walkthrough path/to/wt.json            # validate, exit 0/1
 ```
 
-The script is JSON — format in [`CODEWALKTHROUGH.md`](CODEWALKTHROUGH.md), with a
+The script is JSON — format in [the skill](skills/seendiff/SKILL.md#file-format), with a
 [worked example](examples/seendiff-review-state.json). Every line reference is checked
 against the real diff before rendering, so a stale one fails at load instead of scrolling
 you somewhere wrong. An empty file (`{}`) is fine: seendiff opens as a plain diff tool and
 watches it, so an agent can write the script later and open tabs pick it up in seconds.
 
-## Architecture
+## Privacy
 
-**A Python HTTP server, one hand-written HTML file, and SQLite.** ~4,000 lines shipped,
-plus ~460 of tests.
+Nothing leaves the machine: no telemetry, no accounts. seendiff listens on
+`127.0.0.1` only and refuses requests addressed to any other host name, so another
+web page can't read your source tree through it. `git fetch` runs only with `--fetch`.
 
-```
-git ──► git.py ──────► server.py ──► static/index.html
-                        │   ▲          (fetches JSON, renders)
-        walkthrough.py ─┘   │
-                            ▼
-                        store.py ──► ~/.local/state/seendiff/state.db
-```
-
-| file | lines | what it does |
-|---|---|---|
-| `static/index.html` | 2326 | The whole UI in one file: virtual scroller, side-by-side and unified views, canvas minimap, search, themes, walkthrough player. |
-| `server.py` | 526 | FastAPI on uvicorn, bound to `127.0.0.1`. Diff in memory, recomputed only when HEAD moves. |
-| `git.py` | 446 | Runs `git diff`, parses with `unidiff`, groups hunks into **blocks**, rebuilds each file's whole post-image. |
-| `walkthrough.py` | 348 | Loads and validates walkthrough scripts against the real diff. |
-| `store.py` | 126 | SQLite: review state and preferences. Two tables, no ORM, no migrations. |
-| `cli.py` | 117 | argparse → free port → browser → `uvicorn.run`. |
-| `highlight.py` | 109 | Pygments per line, with bail-outs for minified or enormous files. |
-
-**Blocks, not hunks.** Hunk boundaries move with the context setting. A block is a maximal
-run of adjacent changed lines with a content-derived `hunk_id`, so review state survives a
-rebase. Blocks over `--section-max` lines (48) split into sections of at least
-`--section-min` (12), cut at a seam — removed-to-added turn, blank line, unindented
-declaration — so editing one section costs only that section's state.
-
-**Scope is symbolic.** State is keyed on `repo | base_ref | branch`, not commit SHAs.
-Amend, rebase or reword and it's still there.
-
-**The bar is weighted by lines, not blocks** — a two-line fix and a two-hundred-line
-rewrite are both one block. The counter still reads in blocks, because that's what you
-act on.
-
-**Nothing leaves the machine.** No telemetry, no accounts. The server binds 127.0.0.1 and
-rejects any `Host` that isn't localhost, so another tab can't reach your source tree via
-DNS rebinding. `git fetch` runs only with `--fetch`.
-
-[`PLAN.md`](PLAN.md) is the original build brief — motivation, rejected alternatives, and
-the reasoning behind each locked decision.
-
-## Personal Arch package
-
-[`packaging/arch/`](packaging/arch/PKGBUILD) builds `seendiff-local` from this checkout's
-committed HEAD, replacing the AUR's `seendiff-git` (which builds upstream):
-
-```bash
-cd packaging/arch && makepkg -si
-```
-
-## Development
-
-```bash
-python3 -m venv .venv && .venv/bin/pip install -e . pytest
-.venv/bin/python -m pytest tests/ -q
-```
-
-35 tests. The search-match renderer test runs under `node` (skipped if absent) and pulls
-the functions straight out of `index.html`, so it can't drift from what ships.
+Working on seendiff itself: see [DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## Contributing
 

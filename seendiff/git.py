@@ -1,6 +1,6 @@
 """Git integration: ref resolution, diff invocation, parsing, block grouping.
 
-One diff invocation (see PLAN.md §4): `-U0` over the whole diff, once at
+One diff invocation (DEVELOPMENT.md, "One diff pass"): `-U0` over the whole diff, once at
 startup, for block identity and counts. Display rows are synthesized from those
 same runs plus the new file's content — never from a second `git diff`, because
 git's edit script is not stable across `-U` widths (a line identical on both

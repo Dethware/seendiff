@@ -1,4 +1,4 @@
-"""FastAPI app: API routes, caches, theme.css generation (PLAN.md §8)."""
+"""FastAPI app: API routes, caches, theme.css generation."""
 from __future__ import annotations
 
 import asyncio
@@ -141,7 +141,7 @@ class AppState:
     # valid for any mode and need no invalidation, only pruning
     file_cache: dict[tuple[str, str], dict] = field(default_factory=dict)
 
-    # walkthrough mode (CODEWALKTHROUGH.md §2)
+    # walkthrough mode (DEVELOPMENT.md, "Walkthroughs")
     wt_file: str | None = None                 # path of the JSON, if any
     wt: W.Walkthrough | None = None            # last good copy
     wt_empty: bool = True                      # file absent/empty: plain diff

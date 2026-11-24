@@ -356,7 +356,7 @@ button:hover { border-color: var(--accent); }
 #empty-msg { padding: 48px; color: var(--fg-dim); font-size: 14px;
   font-family: system-ui, sans-serif; }
 
-/* ---- walkthrough (CODEWALKTHROUGH.md §3) ---- */
+/* ---- walkthrough ---- */
 #wt-bar { flex: none; height: var(--wt-height, 160px); background: var(--bg2);
   border-top: 1px solid var(--border); display: flex; flex-direction: column;
   position: relative; font-family: system-ui, sans-serif; }
@@ -786,7 +786,7 @@ let focusIdx = -1;        // focused block index
 let hideDone = localStorage.getItem("seendiff.hide") === "1";
 let selAnchor = null, selEnd = null;   // gutter selection, view row indices
 
-/* ---------- walkthrough state (CODEWALKTHROUGH.md §3) ---------- */
+/* ---------- walkthrough state ---------- */
 let wt = null;              // /api/walkthrough payload, or null
 let wtWatch = false;        // a walkthrough file is configured (maybe empty):
                             // keep polling, the script can arrive any time
@@ -2066,7 +2066,7 @@ function showImageView() {
   v.append(bar, cards);
   applyImgZoom();
   renderImgState();
-  // looking at the pictures is seeing them: same dwell rule as rows (§6)
+  // looking at the pictures is seeing them: same dwell rule as rows
   if (meta.auto_seen) setTimeout(() => {
     const b = blocks[0];
     if (curPath === path && file && file.image && b && !b.seen && !b.reviewed
@@ -2305,7 +2305,7 @@ $("commit-save").onclick = () => saveCommitMsg();
 $("commit-go").onclick = () => doCommit();
 onBackdropClick($("commit-overlay"), closeCommit);
 
-/* ---------- walkthrough (CODEWALKTHROUGH.md §3) ---------- */
+/* ---------- walkthrough ---------- */
 async function loadWalkthrough() {
   try {
     const r = await fetch(withMode("/api/walkthrough"));
@@ -2863,7 +2863,7 @@ $("s-close").onclick = closeSearch;
   });
 }
 
-/* ---------- keymap (PLAN.md §12) ---------- */
+/* ---------- keymap ---------- */
 addEventListener("keydown", e => {
   if (liveDown) {                // inert while disconnected (browser keys pass)
     if (!e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();

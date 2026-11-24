@@ -1,4 +1,4 @@
-"""/api/search: whole-change content search (see README §search)."""
+"""/api/search: whole-change content search (see README, "Search")."""
 from __future__ import annotations
 
 import subprocess

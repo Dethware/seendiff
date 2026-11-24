@@ -1,4 +1,5 @@
-"""Pygments token-stream highlighting with two-pass old/new alignment (PLAN.md §11).
+"""Pygments token-stream highlighting with two-pass old/new alignment
+(DEVELOPMENT.md, "Syntax highlighting").
 
 Per display row we emit a list of (short_css_class, text) pairs. Splitting token
 values at newlines *before* emission makes per-line output correct by
@@ -105,5 +106,5 @@ def highlight_rows(rows, filename: str) -> list[list[tuple[str, str]]] | None:
                 out.append(new_toks[ni]); ni += 1; oi += 1
         return out
     except Exception:
-        # a lexer failure must never take down a file view (PLAN.md §11)
+        # a lexer failure must never take down a file view
         return None
