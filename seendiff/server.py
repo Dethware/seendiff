@@ -833,7 +833,19 @@ def create_app(st: AppState) -> FastAPI:
             "staged": G.staged_changes(st.repo),
             "unstaged": len(st.status.unstaged) + len(st.status.untracked),
             "conflicted": st.status.conflicted,
+            "push": G.push_status(st.repo),
         }
+
+    @app.post("/api/push")
+    def api_push(request: Request):
+        """Push the current branch to its upstream (or create one). A plain
+        def: git push can take a while, and runs in the thread pool."""
+        _need_action_header(request)
+        try:
+            report = G.push(st.repo)
+        except G.GitError as e:
+            raise HTTPException(422, str(e))
+        return {"ok": True, "report": report, "push": G.push_status(st.repo)}
 
     @app.put("/api/commit/message")
     async def api_commit_save(request: Request):

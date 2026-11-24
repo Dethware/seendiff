@@ -751,6 +751,92 @@ def commit(repo: str, message: str) -> str:
     return _git(repo, "log", "-1", "--format=%h %s").strip()
 
 
+# ---------------------------------------------------------------- pushing
+
+PUSH_TIMEOUT = 180
+
+
+def push_status(repo: str) -> dict:
+    """What `push` would do: where to, how many commits, or why it can't.
+
+    Counts come from the local remote-tracking refs, so they are as fresh as
+    the last fetch. A branch behind its upstream is blocked rather than left
+    to git to reject: seendiff never force-pushes, so the answer is a pull.
+    """
+    out = {"branch": branch_name(repo), "upstream": None, "remote": None,
+           "ahead": 0, "behind": 0, "commits": [], "blocked": None}
+    if not out["branch"]:
+        out["blocked"] = "detached HEAD: check out a branch to push"
+        return out
+    try:
+        up = _git(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                  "@{upstream}").strip()
+    except GitError:
+        up = None
+    try:
+        if up:
+            out["upstream"] = up
+            behind, ahead = _git(repo, "rev-list", "--left-right", "--count",
+                                 "@{upstream}...HEAD").split()
+            out["behind"], out["ahead"] = int(behind), int(ahead)
+            rng = ["@{upstream}..HEAD"]
+        else:
+            remotes = _git(repo, "remote").split()
+            remote = ("origin" if "origin" in remotes
+                      else remotes[0] if len(remotes) == 1 else None)
+            if remote is None:
+                out["blocked"] = ("no remote to push to" if not remotes else
+                                  "no upstream and several remotes: "
+                                  "set one with git push -u <remote>")
+                return out
+            out["remote"] = remote
+            # commits no remote has yet: what a first push would publish
+            out["ahead"] = int(_git(repo, "rev-list", "--count", "HEAD",
+                                    "--not", "--remotes").strip())
+            rng = ["HEAD", "--not", "--remotes"]
+        if out["ahead"]:
+            log = _git(repo, "log", "--format=%h%x00%s", "-n", "20", *rng)
+            out["commits"] = [dict(zip(("sha", "subject"), line.split("\0", 1)))
+                              for line in log.splitlines() if "\0" in line]
+    except GitError:
+        out["blocked"] = "nothing committed on this branch yet"
+        return out
+    if out["behind"]:
+        n = out["behind"]
+        out["blocked"] = (f"{up} has {n} commit{'s' if n > 1 else ''} this "
+                          "branch doesn't: pull first")
+    return out
+
+
+def push(repo: str) -> str:
+    """Push the current branch; returns git's report. Never forces.
+
+    No terminal is attached (new session, stdin closed, prompts off): a
+    credential prompt would otherwise hang the request, or appear in whatever
+    terminal started seendiff. An SSH agent, a credential helper or a desktop
+    askpass dialog all still work; anything else fails with git's message.
+    """
+    st = push_status(repo)
+    if st["blocked"]:
+        raise GitError(st["blocked"])
+    if not st["ahead"]:
+        raise GitError("nothing to push")
+    args = (["push"] if st["upstream"] else
+            ["push", "--set-upstream", st["remote"], st["branch"]])
+    try:
+        proc = subprocess.run(
+            ["git", "-C", repo, *args], capture_output=True, text=True,
+            encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL,
+            env=_env({"GIT_TERMINAL_PROMPT": "0"}), start_new_session=True,
+            timeout=PUSH_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise GitError(f"git push gave up after {PUSH_TIMEOUT} s")
+    report = (proc.stderr + proc.stdout).strip()
+    if proc.returncode != 0:
+        raise GitError(report or f"git push failed ({proc.returncode})")
+    return report
+
+
 # ---------------------------------------------------------- worktree files
 
 WORKTREE_MAX_BYTES = 5_000_000

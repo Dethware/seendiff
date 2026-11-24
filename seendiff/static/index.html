@@ -541,12 +541,26 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
 #commit-msgs button.on { background: var(--sel-bg); border-color: var(--accent); }
 #commit-msgs button.dirty::after { content: " •"; color: var(--mixed); }
 #commit-file { color: var(--fg-dim); font-size: 11.5px; font-family: var(--mono-font), monospace; }
+#commit-notes { border-left: 3px solid var(--accent); background: var(--bg);
+  padding: 6px 10px; font-size: 12.5px; max-height: 8em; overflow: auto; }
+#commit-notes[hidden] { display: none; }
+#commit-notes .h { color: var(--fg-dim); font-size: 11px; margin-bottom: 2px; }
+#commit-notes-text { white-space: pre-wrap; color: var(--fg); }
 #commit-text { width: 100%; min-height: 9em; resize: vertical; background: var(--bg);
   color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 8px;
   font: 13px/1.45 var(--mono-font), monospace; }
 #commit-text:focus { outline: none; border-color: var(--accent); }
 #commit-sub { color: var(--fg-dim); font-size: 11.5px; }
 #commit-sub.long { color: var(--mixed); }
+#commit-push { border-top: 1px solid var(--border); padding-top: 6px; font-size: 12.5px; }
+#commit-push-head { display: flex; gap: 10px; align-items: center; }
+#commit-push-what { flex: 1; color: var(--fg-dim); }
+#commit-push-what.blocked { color: var(--mixed); }
+#commit-push-btn { border-color: var(--accent); }
+#commit-push-btn:disabled { opacity: .4; cursor: default; }
+#commit-push-list { font: 12px/1.5 var(--mono-font), monospace; max-height: 6em; overflow: auto;
+  margin-top: 4px; }
+#commit-push-list .sha { color: var(--accent); margin-right: 8px; }
 #commit-staged { max-height: 9em; overflow: auto; font: 12px/1.5 var(--mono-font), monospace;
   border-top: 1px solid var(--border); padding-top: 6px; }
 #commit-staged .st { display: inline-block; width: 1.4em; color: var(--accent); }
@@ -670,7 +684,7 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
       <tr><td>Y</td><td>copy refs for all unreviewed blocks in file</td></tr>
       <tr><td>s</td><td>toggle side-by-side / unified</td></tr>
       <tr><td>m / M</td><td>next / prev view: all · committed · staged · unstaged</td></tr>
-      <tr><td>c</td><td>commit staged changes with a proposed message (COMMIT_MSG_*.txt)</td></tr>
+      <tr><td>c</td><td>commit staged changes with a proposed message, and push</td></tr>
       <tr><td>Ctrl-F</td><td>search all changed files — ⏎ / ⇧⏎ next / prev · Esc closes</td></tr>
       <tr><td>g</td><td>focus file filter</td></tr>
       <tr><td>h</td><td>hide fully-reviewed files</td></tr>
@@ -695,13 +709,22 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
     <div id="commit-head"><b>Commit staged changes</b><span id="commit-branch"></span></div>
     <div id="commit-msgs"></div>
     <div id="commit-file"></div>
+    <div id="commit-notes" hidden>
+      <div class="h">notes from the proposal · not part of the commit</div>
+      <div id="commit-notes-text"></div>
+    </div>
     <textarea id="commit-text" spellcheck="true"
-      placeholder="Proposed message. Lines starting with # are dropped."></textarea>
+      placeholder="Commit message. Lines starting with # are dropped."></textarea>
     <div id="commit-sub"></div>
     <div id="commit-staged"></div>
+    <div id="commit-push">
+      <div id="commit-push-head"><span id="commit-push-what"></span>
+        <button id="commit-push-btn" title="git push (Ctrl+Shift+⏎)">Push</button></div>
+      <div id="commit-push-list"></div>
+    </div>
     <div id="commit-err"></div>
     <div id="commit-btns">
-      <span class="sp">Ctrl+S save · Ctrl+⏎ commit · Esc close</span>
+      <span class="sp">Ctrl+S save · Ctrl+⏎ commit · Ctrl+⇧⏎ push · Esc close</span>
       <button id="commit-save">Save</button>
       <button id="commit-close">Close</button>
       <button id="commit-go">Commit</button>
@@ -850,6 +873,18 @@ async function copyText(text, what) {
 /* every request names the mode: the server holds one diff per mode */
 function withMode(url) {
   return mode ? url + (url.includes("?") ? "&" : "?") + "mode=" + mode : url;
+}
+/* A click on a dialog's backdrop closes it — but only a click that also
+   *started* there. Selecting text inside the dialog and releasing the mouse
+   outside it fires a click whose target is the backdrop (the common ancestor
+   of press and release), and that must not throw the dialog away. */
+function onBackdropClick(el, close) {
+  let downHere = false;
+  el.addEventListener("mousedown", e => { downHere = e.target === el; });
+  el.addEventListener("click", e => {
+    if (e.target === el && downHere) close();
+    downHere = false;
+  });
 }
 async function api(method, url, body) {
   const r = await fetch(withMode(url), {
@@ -1963,7 +1998,7 @@ function toggleHelp(force) {
   $("help-overlay").classList.toggle("show", force);
 }
 $("btn-keys").onclick = () => toggleHelp();
-$("help-overlay").onclick = e => { if (e.target === $("help-overlay")) toggleHelp(false); };
+onBackdropClick($("help-overlay"), () => toggleHelp(false));
 $("btn-hide").onclick = () => {
   hideDone = !hideDone;
   savePref("seendiff.hide", hideDone ? "1" : "0");
@@ -2094,14 +2129,26 @@ function closeCommit() {
   if (cState) stashDraft();
   $("commit-overlay").classList.remove("show");
 }
+/* A proposal is a message plus '#' notes to the reviewer. The notes are shown
+   beside the editor, never in it: left in the text they'd only be deleted by
+   hand, and through any other commit path (an IDE, `git commit -F`) they'd
+   end up in the commit. Saving writes them back after the message. */
+function splitNotes(text) {
+  const lines = text.split("\n");
+  const notes = lines.filter(l => l.startsWith("#"));
+  const msg = lines.filter(l => !l.startsWith("#")).join("\n")
+    .replace(/^\s*\n/, "").replace(/\s+$/, "");
+  return { msg: msg ? msg + "\n" : "", notes: notes.join("\n") };
+}
 function stashDraft() {
   const m = cMsg(cSel), text = $("commit-text").value;
-  if (m ? text !== m.text : text.trim()) cDrafts.set(cKey(), text);
+  if (m ? text !== m.msg : text.trim()) cDrafts.set(cKey(), text);
   else cDrafts.delete(cKey());
 }
 async function loadCommit() {
   try { cState = await (await fetch("/api/commit")).json(); }
   catch (e) { $("commit-err").textContent = "cannot load commit state"; return; }
+  for (const m of cState.messages) Object.assign(m, splitNotes(m.text));
   if (cSel && !cMsg(cSel)) cSel = null;
   if (cSel === null && cState.messages.length && !cDrafts.has(""))
     cSel = cState.messages[0].name;   // oldest first: proposals queue up in order
@@ -2132,7 +2179,10 @@ function renderCommit() {
   const m = cMsg(cSel);
   $("commit-file").textContent = m ? m.name
     : "not saved — Save asks for a short name and writes COMMIT_MSG_<name>.txt";
-  $("commit-text").value = cDrafts.has(cKey()) ? cDrafts.get(cKey()) : (m ? m.text : "");
+  $("commit-text").value = cDrafts.has(cKey()) ? cDrafts.get(cKey()) : (m ? m.msg : "");
+  const notes = m ? m.notes : "";
+  $("commit-notes").hidden = !notes;
+  $("commit-notes-text").textContent = notes.replace(/^# ?/gm, "");
   const st = $("commit-staged"); st.textContent = "";
   if (!cState.staged.length) {
     const d = document.createElement("div"); d.className = "none";
@@ -2152,8 +2202,46 @@ function renderCommit() {
       st.append(d);
     }
   }
+  renderPush();
   updateCommitSub();
 }
+let pBusy = false;
+function renderPush() {
+  const p = cState.push, what = $("commit-push-what"), list = $("commit-push-list");
+  list.textContent = "";
+  const target = p.upstream || (p.remote ? `${p.remote}/${p.branch} (new)` : "");
+  const n = p.ahead;
+  what.className = p.blocked ? "blocked" : "";
+  what.textContent = p.blocked ? p.blocked
+    : !n ? `${p.branch} is up to date with ${target}`
+    : `${n} commit${n > 1 ? "s" : ""} to push: ${p.branch} → ${target}`;
+  for (const c of p.commits) {
+    const d = document.createElement("div");
+    const sha = document.createElement("span"); sha.className = "sha"; sha.textContent = c.sha;
+    d.append(sha, c.subject);
+    list.append(d);
+  }
+  if (n > p.commits.length) {
+    const d = document.createElement("div");
+    d.textContent = `… and ${n - p.commits.length} more`;
+    list.append(d);
+  }
+  $("commit-push-btn").disabled = pBusy || !!p.blocked || !n;
+}
+async function doPush() {
+  if ($("commit-push-btn").disabled) return;
+  pBusy = true; renderPush();
+  $("commit-err").textContent = "pushing…";
+  try {
+    const r = await commitFetch("POST", "/api/push", {});
+    cState.push = r.push;
+    $("commit-err").textContent = "";
+    toast("pushed " + (r.push.upstream || r.push.branch));
+  } catch (e) {
+    $("commit-err").textContent = e.message;
+  } finally { pBusy = false; if (cState) renderPush(); }
+}
+$("commit-push-btn").onclick = () => doPush();
 /* subject-line length: the message becomes a changelog line, keep it short */
 function updateCommitSub() {
   const lines = $("commit-text").value.split("\n").filter(l => !l.startsWith("#"));
@@ -2181,8 +2269,9 @@ async function saveCommitMsg() {
     if (cMsg(name)) { $("commit-err").textContent = name + " already exists"; return; }
   }
   try {
+    const full = text.replace(/\s+$/, "") + "\n" + (m && m.notes ? m.notes + "\n" : "");
     await commitFetch("PUT", "/api/commit/message",
-                      { name, text, mtime_ns: m ? m.mtime_ns : null });
+                      { name, text: full, mtime_ns: m ? m.mtime_ns : null });
     cDrafts.delete(cKey());
     cSel = name;
     $("commit-err").textContent = "";
@@ -2201,9 +2290,11 @@ async function doCommit() {
     cDrafts.delete(cKey());
     cSel = null;
     $("commit-err").textContent = "";
-    $("commit-overlay").classList.remove("show");
     toast("committed " + r.commit);
     pollMeta();
+    // stay open: the push, or the next queued proposal, is one key away
+    await loadCommit();
+    if (!cState.staged.length && !$("commit-push-btn").disabled) $("commit-push-btn").focus();
   } catch (e) {
     $("commit-err").textContent = e.message;
   } finally { cBusy = false; if (cState) updateCommitSub(); }
@@ -2212,7 +2303,7 @@ $("btn-commit").onclick = () => openCommit();
 $("commit-close").onclick = () => closeCommit();
 $("commit-save").onclick = () => saveCommitMsg();
 $("commit-go").onclick = () => doCommit();
-$("commit-overlay").onclick = e => { if (e.target === $("commit-overlay")) closeCommit(); };
+onBackdropClick($("commit-overlay"), closeCommit);
 
 /* ---------- walkthrough (CODEWALKTHROUGH.md §3) ---------- */
 async function loadWalkthrough() {
@@ -2780,6 +2871,7 @@ addEventListener("keydown", e => {
   }
   if (commitOpen()) {           // the panel owns the keyboard while it's open
     if (e.key === "Escape") { e.preventDefault(); closeCommit(); }
+    else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "Enter") { e.preventDefault(); doPush(); }
     else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }
     else if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
       e.preventDefault(); saveCommitMsg(); }

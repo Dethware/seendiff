@@ -129,8 +129,16 @@ what you'd review.
 `c` (or **commit** in the top bar) commits what's **staged**, with a proposed message
 you can edit first. Proposals are plain files in the repo root, one per queued change:
 `COMMIT_MSG_<description>.txt`. An agent writes one, you review the diff, then pick the
-proposal, edit it and press `Ctrl-⏎`. Lines starting with `#` are dropped, so a proposal
-can carry notes to you. The file is deleted once committed; the others stay queued.
+proposal, edit it and press `Ctrl-⏎`. Lines starting with `#` are notes to you: the panel
+shows them above the message, never in it, and they're kept in the file when you save.
+The file is deleted once committed; the others stay queued.
+
+After a commit the panel stays open with a **Push** row: how many commits would go to
+which upstream, with their subjects. `Ctrl-⇧-⏎` (or **Push**) pushes. A branch without
+an upstream gets one on `origin`, or on the only remote there is; a branch behind its
+upstream can't be pushed until you pull, and seendiff never force-pushes. Pushing uses
+your usual credentials (SSH agent, credential helper), but can't ask for a password in
+a terminal: if git needs one, the push fails with git's message.
 Edits are kept as drafts while the panel is closed, and `Ctrl-S` writes them back to the
 file. A proposal that changed on disk since you opened it is never overwritten or
 committed. seendiff leaves these files out of its diffs. Hooks run as usual, and a
