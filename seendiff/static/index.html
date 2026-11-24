@@ -559,6 +559,17 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
 #commit-go { border-color: var(--add-sign); color: var(--add-sign); }
 #commit-go:disabled { opacity: .4; cursor: default; }
 
+/* ---- stale: the server is gone, the page is inert ---- */
+#stale-overlay { position: fixed; inset: 0; z-index: 100; display: none;
+  align-items: center; justify-content: center; cursor: not-allowed;
+  background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: grayscale(1) blur(1px); }
+#stale-overlay.show { display: flex; }
+#stale-box { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+  padding: 18px 22px; max-width: 420px; box-shadow: 0 8px 32px rgba(0,0,0,.35);
+  cursor: default; }
+#stale-msg { font-weight: 600; margin-bottom: 6px; }
+#stale-hint { color: var(--fg-dim); font-size: 12.5px; }
+
 /* ---- confirm ---- */
 #confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45);
   display: none; align-items: center; justify-content: center; z-index: 21; }
@@ -695,6 +706,13 @@ mark.cur { background: color-mix(in srgb, var(--mixed) 65%, transparent);
       <button id="commit-close">Close</button>
       <button id="commit-go">Commit</button>
     </div>
+  </div>
+</div>
+<div id="stale-overlay">
+  <div id="stale-box">
+    <div id="stale-msg"></div>
+    <div id="stale-hint">Close this tab, or start seendiff again: the page
+      reloads by itself when it's back.</div>
   </div>
 </div>
 <div id="confirm-overlay">
@@ -1681,26 +1699,57 @@ function flushSeen(beacon) {
                          headers: { "content-type": "application/json" } });
   }
 }
-setInterval(() => { evalSeen(); flushSeen(false); wtPoll(); pollMeta(); }, 2000);
+setInterval(() => {
+  if (liveDown) return;          // nothing to talk to; don't spray errors
+  evalSeen(); flushSeen(false); wtPoll(); pollMeta();
+}, 2000);
 
-/* ---------- presence ----------
-   The server exits a few seconds after its last tab is gone (server.py
-   Presence). Each page load is one client: hello now and every 15 s, bye on
-   pagehide. A page restored from the back/forward cache says hello again. */
-const CLIENT_ID = (crypto.randomUUID && crypto.randomUUID())
-  || (Math.random().toString(36).slice(2) + Date.now().toString(36));
-function sayHello() {
-  fetch("/api/hello", { method: "POST", keepalive: true,
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id: CLIENT_ID }) }).catch(() => {});
+/* ---------- live connection ----------
+   One EventSource per page (server.py /api/events). Its open socket is how
+   the server knows this tab exists — it exits ~2 s after the last one goes —
+   and its failure is how the tab knows the server is gone: then the page is
+   covered and inert, since nothing it shows can be acted on any more. The
+   browser keeps retrying; a reply from a *different* server process (seendiff
+   started again on this port) reloads the page, the same one picks up where
+   it was. A page restored from the back/forward cache reconnects. */
+let liveInstance = null, liveDown = false, liveDownTimer = null, liveES = null;
+function connectLive() {
+  if (liveES) liveES.close();
+  const es = liveES = new EventSource("/api/events");
+  es.addEventListener("hello", e => {
+    let inst = null;
+    try { inst = JSON.parse(e.data).instance; } catch (err) {}
+    if (liveInstance && inst !== liveInstance) { location.reload(); return; }
+    liveInstance = inst;
+    setLiveDown(false);
+  });
+  es.onerror = () => {
+    if (es.readyState === EventSource.OPEN) return;
+    setLiveDown(true);
+    // CLOSED means the browser gave up retrying on its own: keep trying
+    if (es.readyState === EventSource.CLOSED) setTimeout(connectLive, 2000);
+  };
 }
-sayHello();
-setInterval(sayHello, 15000);
-addEventListener("pagehide", () => {
-  navigator.sendBeacon("/api/bye",
-    new Blob([JSON.stringify({ id: CLIENT_ID })], { type: "application/json" }));
-});
-addEventListener("pageshow", e => { if (e.persisted) sayHello(); });
+function setLiveDown(down) {
+  if (down === liveDown) return;
+  liveDown = down;
+  const ov = $("stale-overlay");
+  clearTimeout(liveDownTimer);
+  if (!down) { ov.classList.remove("show"); return; }
+  $("stale-msg").textContent = "Reconnecting to seendiff…";
+  ov.classList.add("show");
+  if (document.activeElement) document.activeElement.blur();
+  // a blip is a reconnect; still down after 3 s, the server has stopped
+  liveDownTimer = setTimeout(() => {
+    if (!liveDown) return;
+    $("stale-msg").textContent = "seendiff has stopped. This page is out of date.";
+    // Browsers only let a script close a window a script opened, so this
+    // works in some setups and is a no-op in most; the cover stays either way.
+    try { window.close(); } catch (e) {}
+  }, 3000);
+}
+connectLive();
+addEventListener("pageshow", e => { if (e.persisted) connectLive(); });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") pollMeta();   // catch up at once
 });
@@ -2725,6 +2774,10 @@ $("s-close").onclick = closeSearch;
 
 /* ---------- keymap (PLAN.md §12) ---------- */
 addEventListener("keydown", e => {
+  if (liveDown) {                // inert while disconnected (browser keys pass)
+    if (!e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault();
+    return;
+  }
   if (commitOpen()) {           // the panel owns the keyboard while it's open
     if (e.key === "Escape") { e.preventDefault(); closeCommit(); }
     else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doCommit(); }

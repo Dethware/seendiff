@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--keep-running", action="store_true",
                     help="keep serving after the last browser tab closes "
-                    "(by default seendiff exits a few seconds after it)")
+                    "(by default seendiff exits about 2 s after it)")
     ap.add_argument("--walkthrough", metavar="PATH", default=None,
                     help="open a walkthrough JSON in walkthrough mode")
     ap.add_argument("--check-walkthrough", metavar="PATH", default=None,
@@ -154,23 +154,34 @@ def main(argv: list[str] | None = None) -> int:
           f"(merge base {st.mb_sha[:12]}), showing {args.mode} — {url}")
     if not args.no_browser:
         threading.Timer(0.6, webbrowser.open, args=(url,)).start()
+    # Open tabs hold /api/events streams forever; without a bound, Ctrl-C would
+    # wait on them. One second, then they're cut and the tabs show stale.
     server = uvicorn.Server(uvicorn.Config(
-        app, host="127.0.0.1", port=port, log_level="warning"))
-    if not args.keep_running:
-        threading.Thread(target=_exit_when_idle, args=(st, server),
-                         daemon=True).start()
-    server.run()
+        app, host="127.0.0.1", port=port, log_level="warning",
+        timeout_graceful_shutdown=1))
+    threading.Thread(target=_supervise,
+                     args=(st, server, not args.keep_running),
+                     daemon=True).start()
+    try:
+        server.run()
+    except KeyboardInterrupt:
+        # uvicorn re-raises Ctrl-C once it has shut down; uvicorn.run() used
+        # to swallow it for us, Server.run() doesn't
+        pass
     return 0
 
 
-def _exit_when_idle(st: AppState, server: uvicorn.Server) -> None:
-    """Stop the server once every tab that connected has gone (Presence)."""
+def _supervise(st: AppState, server: uvicorn.Server, exit_when_idle: bool) -> None:
+    """Stop the server once every tab that connected has gone (Presence), and
+    tell open event streams the moment shutdown starts, from either cause
+    (idle, or Ctrl-C), so they end cleanly before uvicorn waits on them."""
     while not server.should_exit:
-        if st.presence.idle():
+        if exit_when_idle and st.presence.idle():
             print("seendiff: last browser tab closed, exiting", file=sys.stderr)
             server.should_exit = True
-            return
-        time.sleep(1)
+            break
+        time.sleep(0.2)
+    st.stopping.set()
 
 
 if __name__ == "__main__":

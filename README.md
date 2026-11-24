@@ -69,8 +69,10 @@ seendiff --port 8700     # a fixed port instead of a free one
 ```
 
 It picks a free port, starts a localhost server and opens your browser. Close the tab and
-it exits a few seconds later (a reload doesn't count); `--keep-running` keeps it serving,
-and `Ctrl-C` always stops it.
+it exits about two seconds later (a reload doesn't count); `--keep-running` keeps it
+serving, and `Ctrl-C` always stops it. If seendiff stops while a tab is still open, the
+tab closes itself where the browser allows it, and otherwise greys out and ignores input.
+Start seendiff again on the same port and the tab reloads by itself.
 
 Four views, switched in the sidebar or with `m` / `M`; each tab shows its file count:
 

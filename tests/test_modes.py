@@ -332,16 +332,15 @@ def test_presence_exits_after_the_last_tab_and_grace():
     from seendiff.server import Presence
     clk = _Clock()
     p = Presence(clock=clk)
-    p.hello("tab-aaaaaa")
-    p.hello("tab-bbbbbb")
-    p.bye("tab-aaaaaa")
-    clk.t += 60
-    p.hello("tab-bbbbbb")                     # heartbeat
-    assert not p.idle()                       # one tab still open
-    p.bye("tab-bbbbbb")
-    clk.t += Presence.GRACE - 1
+    p.hello("tab-a")
+    p.hello("tab-b")
+    p.bye("tab-a")
+    clk.t += 600                              # a stream can stay open for hours
     assert not p.idle()
-    clk.t += 2
+    p.bye("tab-b")
+    clk.t += Presence.GRACE - 0.5
+    assert not p.idle()
+    clk.t += 1
     assert p.idle()
 
 
@@ -349,31 +348,59 @@ def test_presence_reload_within_grace_keeps_running():
     from seendiff.server import Presence
     clk = _Clock()
     p = Presence(clock=clk)
-    p.hello("old-page-id")
-    p.bye("old-page-id")
-    clk.t += 1
-    p.hello("new-page-id")
-    clk.t += Presence.GRACE * 3
+    p.hello("old-page")
+    p.bye("old-page")
+    clk.t += 0.5
+    p.hello("new-page")
+    clk.t += Presence.GRACE * 10
     assert not p.idle()
 
 
-def test_presence_unknown_bye_is_ignored_and_silent_tabs_expire():
+def test_presence_unknown_bye_is_ignored():
     from seendiff.server import Presence
     clk = _Clock()
     p = Presence(clock=clk)
-    p.hello("real-tab-id")
-    p.bye("forged-id-xx")
+    p.hello("real-tab")
+    p.bye("nobody")
+    clk.t += 100
     assert not p.idle()
-    clk.t += Presence.STALE - 1
-    assert not p.idle()
-    clk.t += 2                                # crashed: no bye, no heartbeat
-    assert p.idle()
 
 
-def test_hello_and_bye_endpoints(client):
-    assert client.post("/api/hello", json={"id": "short"}).status_code == 400
-    assert client.post("/api/hello", json={"id": "a-page-id-123"}).status_code == 200
-    # bye arrives as a beacon: text/plain body
-    r = client.post("/api/bye", content=b'{"id": "a-page-id-123"}',
-                    headers={"content-type": "text/plain"})
-    assert r.status_code == 200
+def test_event_stream_is_a_tabs_presence(repo, tmp_path):
+    """Opening /api/events registers a tab; dropping the connection is the
+    tab closing — no goodbye message needed."""
+    import threading, time, socket, uvicorn
+    st = AppState(repo=str(repo), base_ref="main",
+                  db_path=str(tmp_path / "state.db"))
+    app = create_app(st)
+    with socket.socket() as sk:
+        sk.bind(("127.0.0.1", 0))
+        port = sk.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
+                                           log_level="error",
+                                           timeout_graceful_shutdown=1))
+    th = threading.Thread(target=server.run, daemon=True)
+    th.start()
+    try:
+        for _ in range(100):
+            if server.started:
+                break
+            time.sleep(0.05)
+        conn = socket.create_connection(("127.0.0.1", port))
+        conn.sendall(b"GET /api/events HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        head = conn.recv(4096).decode()
+        assert "text/event-stream" in head
+        if "event: hello" not in head:
+            head += conn.recv(4096).decode()
+        assert "event: hello" in head and '"instance"' in head
+        assert len(st.presence.clients) == 1 and not st.presence.idle()
+        conn.close()                           # the tab goes away, no bye
+        for _ in range(50):
+            if not st.presence.clients:
+                break
+            time.sleep(0.05)
+        assert not st.presence.clients
+        assert st.presence.empty_since is not None
+    finally:
+        server.should_exit = True
+        th.join(5)

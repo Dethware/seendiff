@@ -1,18 +1,20 @@
 """FastAPI app: API routes, caches, theme.css generation (PLAN.md §8)."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 import re
+import secrets
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from threading import Lock
+from threading import Event, Lock
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pygments.formatters import HtmlFormatter
 
 from . import git as G
@@ -61,50 +63,41 @@ def prune_cache(root: Path, days: int = CACHE_PRUNE_DAYS) -> None:
 class Presence:
     """Which browser tabs are open, so the server can exit with the last one.
 
-    A tab says hello when it loads and every PING seconds after, and bye on
-    pagehide (a beacon, which survives the tab closing). The server is idle
-    once it has seen at least one tab, none is left, and GRACE seconds have
-    passed — long enough for a reload to say hello again. A tab that dies
-    without a bye (browser crash, quit) counts as gone after STALE seconds of
-    silence; that bound has to outlast Chrome's throttling of hidden tabs,
-    which can slow a 15 s timer to once a minute.
+    Each tab holds one /api/events stream open for as long as it lives; the
+    stream's lifetime *is* the tab's presence. A closed tab drops its socket,
+    which the server notices within a fraction of a second whatever the
+    browser does on the way out (some embedded browsers never fire pagehide).
 
-    The clock is monotonic, which on Linux stops while the machine sleeps, so
-    a laptop lid doesn't look like every tab going silent.
+    The server is idle once it has seen at least one tab, none is left, and
+    GRACE seconds have passed: just enough for a reload to reconnect.
     """
-    GRACE = 8.0
-    STALE = 150.0
+    GRACE = 2.0
 
     def __init__(self, clock=time.monotonic):
         self.clock = clock
         self.lock = Lock()
-        self.clients: dict[str, float] = {}
+        self.clients: set[str] = set()
         self.armed = False             # nothing to wait for until a tab shows up
         self.empty_since: float | None = None
 
     def hello(self, cid: str) -> None:
         with self.lock:
-            self.clients[cid] = self.clock()
+            self.clients.add(cid)
             self.armed = True
             self.empty_since = None
 
     def bye(self, cid: str) -> None:
         with self.lock:
-            if self.clients.pop(cid, None) is not None and not self.clients:
-                self.empty_since = self.clock()
+            if cid in self.clients:
+                self.clients.discard(cid)
+                if not self.clients:
+                    self.empty_since = self.clock()
 
     def idle(self) -> bool:
         with self.lock:
-            now = self.clock()
-            stale = [c for c, t in self.clients.items() if now - t > self.STALE]
-            for c in stale:
-                del self.clients[c]
-            if stale and not self.clients:
-                # silent for STALE already: no reload is coming, don't wait again
-                self.empty_since = now - self.GRACE
             return (self.armed and not self.clients
                     and self.empty_since is not None
-                    and now - self.empty_since >= self.GRACE)
+                    and self.clock() - self.empty_since >= self.GRACE)
 
 
 @dataclass
@@ -132,6 +125,9 @@ class AppState:
     default_mode: str = G.DEFAULT_MODE
     untracked: bool = True
     presence: Presence = field(default_factory=Presence)
+    # set when the server begins shutting down: open /api/events streams end
+    # themselves on it, instead of being cancelled (with tracebacks) later
+    stopping: Event = field(default_factory=Event)
 
     mb_sha: str = ""
     head_sha: str = ""
@@ -465,6 +461,7 @@ def create_app(st: AppState) -> FastAPI:
     app = FastAPI()
     app.add_middleware(GZipMiddleware, minimum_size=2048)
     db = store.open_db(st.db_path)
+    instance = secrets.token_hex(8)        # names this process to its tabs
     st.refresh()
     prune_cache(cache_root())
     theme_css = _theme_css()
@@ -492,24 +489,36 @@ def create_app(st: AppState) -> FastAPI:
         return Response(html, media_type="text/html",
                         headers={"Cache-Control": "no-store"})
 
-    def _client_id(body: dict) -> str:
-        cid = body.get("id")
-        if not isinstance(cid, str) or not 8 <= len(cid) <= 64:
-            raise HTTPException(400, "id must be a string of 8–64 characters")
-        return cid
+    @app.get("/api/events")
+    async def api_events(request: Request):
+        """The tab's live line to the server (Presence), as Server-Sent Events.
 
-    @app.post("/api/hello")
-    async def api_hello(request: Request):
-        """A tab is open (sent on load and as a heartbeat)."""
-        st.presence.hello(_client_id(await _json_body(request)))
-        return {"ok": True}
+        Opens with a `hello` naming this server process, so a tab that lost
+        its server and reconnects to a *new* one on the same port knows to
+        reload rather than act on stale state. A comment line every 15 s
+        keeps idle proxies and half-open sockets honest.
+        """
+        cid = secrets.token_hex(8)
 
-    @app.post("/api/bye")
-    async def api_bye(request: Request):
-        """A tab closed or navigated away (sendBeacon on pagehide). Only a
-        known random id is removed, so a stray POST can't end the server."""
-        st.presence.bye(_client_id(await _json_body(request)))
-        return {"ok": True}
+        async def stream():
+            st.presence.hello(cid)
+            try:
+                yield ("retry: 1000\nevent: hello\n"
+                       f"data: {json.dumps({'instance': instance})}\n\n")
+                last = time.monotonic()
+                while not (st.stopping.is_set()
+                           or await request.is_disconnected()):
+                    await asyncio.sleep(0.2)
+                    if time.monotonic() - last >= 15:
+                        last = time.monotonic()
+                        yield ": ping\n\n"
+            finally:
+                # also runs when the response is cancelled (disconnect noticed
+                # by Starlette first, or shutdown)
+                st.presence.bye(cid)
+
+        return StreamingResponse(stream(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-store"})
 
     @app.get("/api/prefs")
     def api_prefs_get():
